@@ -18,6 +18,7 @@
     <string name="speed_threshold_invalid">请输入 0 至 2147483647 的整数</string>
     <string name="battery_line">横线显示电量</string>
     <string name="battery_line_color">横线颜色（%1$s）</string>
+    <string name="battery_line_color_automatic">横线颜色（按电量）</string>
     <string name="choose_line_color">选择横线颜色</string>
     <string name="charging_animation">充电动画（%1$s）</string>
     <string name="choose_charging_animation">选择充电动画</string>

@@ -31,16 +31,15 @@ internal class BatteryLine(
     private val paint = Paint().apply { this.color = color }
     private val animationPath = Path()
     private val gradientPosition = Matrix()
-    private val gradient by lazy {
-        val toward = if (Color.luminance(color) > 0.65f) Color.BLACK else Color.WHITE
-        val transparent = toward and 0x00FFFFFF
-        LinearGradient(
-            0f, 0f, 1f, 0f,
-            intArrayOf(transparent, toward, toward, transparent),
-            floatArrayOf(0f, 0.42f, 0.58f, 1f),
-            Shader.TileMode.CLAMP,
-        )
-    }
+    private val lightGradient by lazy { createGradient(Color.WHITE) }
+    private val darkGradient by lazy { createGradient(Color.BLACK) }
+
+    private fun createGradient(highlight: Int): LinearGradient = LinearGradient(
+        0f, 0f, 1f, 0f,
+        intArrayOf(highlight and 0x00FFFFFF, highlight, highlight, highlight and 0x00FFFFFF),
+        floatArrayOf(0f, 0.42f, 0.58f, 1f),
+        Shader.TileMode.CLAMP,
+    )
     private val nextFrame = Runnable { invalidateSelf() }
     private var charging = false
     private var animationStart = 0L
@@ -142,7 +141,7 @@ internal class BatteryLine(
         val width = bounds.width() * (level.toFloat() / FULL_LEVEL)
         if (width <= 0f || bounds.isEmpty) return
         val alpha = paint.alpha
-        paint.color = if (!batteryColors || charging) color else when {
+        paint.color = if (!batteryColors) color else when {
             level <= 1500 -> 0xFFD32F2F.toInt()
             level <= 3500 -> 0xFFF57C00.toInt()
             else -> 0xFF32A852.toInt()
@@ -176,6 +175,7 @@ internal class BatteryLine(
 
         gradientPosition.setScale(band, 1f)
         gradientPosition.postTranslate(left, 0f)
+        val gradient = if (Color.luminance(paint.color) > 0.65f) darkGradient else lightGradient
         gradient.setLocalMatrix(gradientPosition)
         animationPath.rewind()
         animationPath.moveTo(left, 0f)

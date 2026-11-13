@@ -57,6 +57,8 @@ class NetworkIconModule : XposedModule() {
     private var slowSince: Long? = null
     private var latestSpeed: Double? = null
     private var speedFields: Pair<java.lang.reflect.Field, java.lang.reflect.Field>? = null
+    private val weatherViews = WeakHashMap<View, WeakReference<StatusBarWeather>>()
+    private var weatherTint: ColorStateList? = null
     private var speedMirror: WeakReference<TextView>? = null
     private val speedCheck = Runnable { refreshSpeed() }
     private val foregroundCheck = Runnable { refreshForeground() }
@@ -141,6 +143,7 @@ class NetworkIconModule : XposedModule() {
         }
         lineHosts.keys.toList().forEach { view ->
             install("Refresh battery line") { updateLine(view, current) }
+            install("Refresh status bar weather") { updateWeather(view, current) }
         }
         clockControllers.keys.toList().forEach { view ->
             install("Refresh status bar clock") { clockUpdate?.invoke(view) }
@@ -185,6 +188,10 @@ class NetworkIconModule : XposedModule() {
                     } else null
                     controller?.restoreSystemColor()
                     val result = chain.proceed()
+                    if (view != null && controller != null && method.name != "updateTime") {
+                        weatherTint = view.textColors
+                        weatherViews.values.forEach { it.get()?.tint(view.textColors) }
+                    }
                     settings?.let { current ->
                         controller?.configure(secondsOverride ?: current.clockSeconds, current.clockColor, current.options)
                     }
@@ -237,13 +244,33 @@ class NetworkIconModule : XposedModule() {
                     val view = chain.thisObject as? View
                     if (view != null && view.javaClass in hosts && view !in lineHosts) {
                         lineHosts[view] = null
-                        settings?.let { updateLine(view, it) }
+                        settings?.let {
+                            updateLine(view, it)
+                            install("Status bar weather") { updateWeather(view, it) }
+                        }
                     }
                     result
                 }
                 if (settings?.debug == true) report(Log.DEBUG, "Battery line signature: $method")
             }
         }
+    }
+
+    private fun updateWeather(host: View, current: IconSettings) {
+        if (!current.options.showWeather || profile != null) {
+            weatherViews.remove(host)?.get()?.uninstall()
+            return
+        }
+        if (weatherViews[host]?.get() != null) return
+        val resources = host.resources
+        val contentsId = resources.getIdentifier("status_bar_contents", "id", SYSTEM_UI)
+        val contents = host.findViewById<View>(contentsId) ?: return
+        val frame = contents.parent as? android.widget.FrameLayout ?: return
+        if (contents.layoutParams !is android.widget.FrameLayout.LayoutParams) return
+        val weather = StatusBarWeather(frame, contents)
+        weatherTint?.let(weather::tint)
+        weather.install()
+        weatherViews[host] = WeakReference(weather)
     }
 
     private fun updateLine(view: View, settings: IconSettings) {

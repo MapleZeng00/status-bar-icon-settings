@@ -63,6 +63,8 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
         return input
     }
 
+    title("天气")
+    toggle("显示天气（状态栏最右侧）", initial.showWeather) { draft = draft.copy(showWeather = it) }
     title("网速与电量")
     toggle("网速分档变色（50 / 1024 KB/s）", initial.speedColors) { draft = draft.copy(speedColors = it) }
     toggle("网速防抖（连续低速至少 3 秒才隐藏）", initial.speedSmoothing) { draft = draft.copy(speedSmoothing = it) }

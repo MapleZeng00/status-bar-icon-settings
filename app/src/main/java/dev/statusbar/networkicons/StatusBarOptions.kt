@@ -3,6 +3,7 @@ package dev.statusbar.networkicons
 import android.content.SharedPreferences
 
 internal data class StatusBarOptions(
+    val showWeather: Boolean = false,
     val speedColors: Boolean = false,
     val speedSmoothing: Boolean = false,
     val batteryColors: Boolean = false,
@@ -18,7 +19,8 @@ internal data class StatusBarOptions(
     val gamingApps: String = "",
 ) {
     fun save(editor: SharedPreferences.Editor) {
-        editor.putBoolean("speed_colors", speedColors)
+        editor.putBoolean("show_weather", showWeather)
+            .putBoolean("speed_colors", speedColors)
             .putBoolean("speed_smoothing", speedSmoothing)
             .putBoolean("battery_colors", batteryColors)
             .putBoolean("clock_weekday", weekday)
@@ -35,6 +37,7 @@ internal data class StatusBarOptions(
 
     companion object {
         fun read(values: Map<String, *>): StatusBarOptions = StatusBarOptions(
+            showWeather = values["show_weather"] == true,
             speedColors = values["speed_colors"] == true,
             speedSmoothing = values["speed_smoothing"] == true,
             batteryColors = values["battery_colors"] == true,

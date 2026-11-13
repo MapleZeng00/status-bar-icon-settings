@@ -106,6 +106,8 @@ class SettingsActivity : Activity() {
         optionsButton = addAction(advanced) {
             showStatusBarOptions(this, options) {
                 options = it
+                updateColorButton()
+                updateBatteryButtons()
                 saveSettings()
             }
         }.apply { setText(R.string.status_bar_options) }
@@ -224,6 +226,7 @@ class SettingsActivity : Activity() {
                     selectedSpeedThreshold = settings.networkSpeedThreshold
                     updateSpeedThresholdButton()
                     batteryLine.isChecked = settings.batteryLine
+                    options = settings.options
                     selectedColor = settings.batteryLineColor
                     updateColorButton()
                     selectedAnimation = settings.chargingAnimation
@@ -232,7 +235,6 @@ class SettingsActivity : Activity() {
                     selectedClockColor = settings.clockColor
                     updateClockColorButton()
                     debug.isChecked = settings.debug
-                    options = settings.options
                     prefs = remote
                     setControls(true)
                 }
@@ -332,8 +334,12 @@ class SettingsActivity : Activity() {
     }
 
     private fun updateColorButton() {
-        lineColor.text = getString(R.string.battery_line_color, colorHex(selectedColor))
-        lineColor.setCompoundDrawablesRelative(colorSwatch(selectedColor), null, null, null)
+        val automatic = options.batteryColors
+        lineColor.text = if (automatic) getString(R.string.battery_line_color_automatic)
+            else getString(R.string.battery_line_color, colorHex(selectedColor))
+        lineColor.setCompoundDrawablesRelative(
+            if (automatic) null else colorSwatch(selectedColor), null, null, null,
+        )
     }
 
     private fun colorSwatch(color: Int): GradientDrawable {
@@ -387,10 +393,11 @@ class SettingsActivity : Activity() {
     }
 
     private fun updateBatteryButtons() {
-        lineColor.isEnabled = batteryLine.isEnabled && batteryLine.isChecked
-        chargingAnimation.isEnabled = lineColor.isEnabled
+        val enabled = batteryLine.isEnabled && batteryLine.isChecked
+        lineColor.isEnabled = enabled && !options.batteryColors
+        chargingAnimation.isEnabled = enabled
         lineColor.alpha = if (lineColor.isEnabled) 1f else 0.55f
-        chargingAnimation.alpha = lineColor.alpha
+        chargingAnimation.alpha = if (enabled) 1f else 0.55f
     }
 
     private fun setControls(enabled: Boolean) {
