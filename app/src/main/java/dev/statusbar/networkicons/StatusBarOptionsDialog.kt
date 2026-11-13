@@ -95,7 +95,7 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     toggle("时间前显示星期", initial.weekday) { draft = draft.copy(weekday = it) }
     toggle("淡化秒数", initial.dimSeconds) { draft = draft.copy(dimSeconds = it) }
     toggle("等宽数字", initial.tabularClock) { draft = draft.copy(tabularClock = it) }
-    toggle("时钟手势：单击切换淡化，双击切换显秒，长按打开闹钟", initial.clockGestures) { draft = draft.copy(clockGestures = it) }
+    toggle("时钟手势：单击切换显秒，长按打开闹钟", initial.clockGestures) { draft = draft.copy(clockGestures = it) }
     title("图标布局")
     toggle("网速移到时间旁边", initial.speedByClock) { draft = draft.copy(speedByClock = it) }
     val order = field("图标顺序（留空为系统顺序）", initial.iconOrder)

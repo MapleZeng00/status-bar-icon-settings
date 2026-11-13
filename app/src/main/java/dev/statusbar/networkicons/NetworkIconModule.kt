@@ -8,7 +8,6 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.GestureDetector
-import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.service.notification.StatusBarNotification
@@ -53,7 +52,6 @@ class NetworkIconModule : XposedModule() {
     private var gamingPackages = emptySet<String>()
     private var allowedPackages: Set<String>? = null
     private var secondsOverride: Boolean? = null
-    private var dimSecondsOverride: Boolean? = null
     private val clockGestures = WeakHashMap<View, GestureDetector>()
     private var speedBlocked = false
     private var slowSince: Long? = null
@@ -120,9 +118,6 @@ class NetworkIconModule : XposedModule() {
         val previous = settings
         settings = next
         if (previous?.clockSeconds != next.clockSeconds || !next.options.clockGestures) secondsOverride = null
-        if (previous?.options?.dimSeconds != next.options.dimSeconds || !next.options.clockGestures) {
-            dimSecondsOverride = null
-        }
         if (previous != next) report(Log.INFO, "Live settings received")
         if (next.debug) report(Log.DEBUG, "Status bar settings refreshed")
         readingPackages = packageNames(next.options.readingApps)
@@ -201,7 +196,6 @@ class NetworkIconModule : XposedModule() {
                             secondsOverride ?: current.clockSeconds,
                             current.clockColor,
                             current.options,
-                            dimSecondsOverride ?: current.options.dimSeconds,
                         )
                     }
                     if (view != null && controller != null) {
@@ -612,38 +606,9 @@ class NetworkIconModule : XposedModule() {
 
             override fun onDown(event: MotionEvent): Boolean = clockAt(event) != null
 
-            override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+            override fun onSingleTapUp(event: MotionEvent): Boolean {
                 val clock = clockAt(event) ?: return false
                 val current = settings ?: return false
-                dimSecondsOverride = !(dimSecondsOverride ?: current.options.dimSeconds)
-                install("Toggle dimmed clock seconds") { clockUpdate?.invoke(clock) }
-                return true
-            }
-
-            override fun onDoubleTap(event: MotionEvent): Boolean {
-                firstTapOnClock = clockAt(event) != null
-                return firstTapOnClock
-            }
-
-            override fun onDoubleTapEvent(event: MotionEvent): Boolean {
-                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    secondTapX = event.rawX
-                    secondTapY = event.rawY
-                    validSecondTap = firstTapOnClock && clockAt(event) != null
-                }
-                val slop = hostRef.get()?.let { ViewConfiguration.get(it.context).scaledTouchSlop } ?: 0
-                if (event.actionMasked == MotionEvent.ACTION_CANCEL || event.pointerCount != 1 ||
-                    kotlin.math.abs(event.rawX - secondTapX) > slop ||
-                    kotlin.math.abs(event.rawY - secondTapY) > slop
-                ) validSecondTap = false
-
-                if (event.actionMasked != MotionEvent.ACTION_UP) return validSecondTap
-                val clock = if (validSecondTap) clockAt(event) else null
-                validSecondTap = false
-                val current = settings ?: return false
-                if (clock == null || event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout()) {
-                    return false
-                }
                 secondsOverride = !(secondsOverride ?: current.clockSeconds)
                 main.post { install("Toggle clock seconds") { clockUpdate?.invoke(clock) } }
                 return true
@@ -658,12 +623,11 @@ class NetworkIconModule : XposedModule() {
                 }
             }
 
-            private var firstTapOnClock = false
-            private var secondTapX = 0f
-            private var secondTapY = 0f
-            private var validSecondTap = false
         }
-        return GestureDetector(host.context, listener, main)
+        return GestureDetector(host.context, listener, main).apply {
+            // SimpleOnGestureListener also implements OnDoubleTapListener.
+            setOnDoubleTapListener(null)
+        }
     }
 
     // Limit the alternate child order to measurement and layout calls. OEM icon indices stay intact.
