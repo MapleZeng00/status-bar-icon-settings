@@ -7,7 +7,12 @@ import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.PowerManager
+import android.graphics.Color
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 import android.text.format.DateFormat
+import java.text.FieldPosition
 import android.util.Log
 import android.view.View
 import android.widget.TextView
@@ -19,6 +24,9 @@ import java.util.TimeZone
 internal class StatusBarClock(
     private val view: TextView,
 ) : View.OnAttachStateChangeListener {
+    private var options = StatusBarOptions()
+    private var originalFontFeatures: String? = null
+    private var tabularApplied = false
     private var showSeconds = false
     private var color: Int? = null
     private var systemColor: ColorStateList? = null
@@ -47,7 +55,18 @@ internal class StatusBarClock(
         systemColor = null
     }
 
-    fun configure(seconds: Boolean, customColor: Int?) {
+    fun configure(seconds: Boolean, customColor: Int?, next: StatusBarOptions) {
+        if (options != next) format = null
+        options = next
+        if (next.tabularClock != tabularApplied) {
+            if (next.tabularClock) {
+                originalFontFeatures = view.fontFeatureSettings
+                view.fontFeatureSettings = listOfNotNull(originalFontFeatures?.takeIf(String::isNotBlank), "'tnum'").joinToString(", ")
+            } else {
+                view.fontFeatureSettings = originalFontFeatures
+            }
+            tabularApplied = next.tabularClock
+        }
         if (color != customColor) restoreSystemColor()
         color = customColor
         if (showSeconds != seconds) {
@@ -101,11 +120,14 @@ internal class StatusBarClock(
             if (systemColor == null) systemColor = view.textColors
             if (view.currentTextColor != custom) view.setTextColor(custom)
         }
-        if (!showSeconds) return
+        if (!showSeconds && !options.weekday) return
         val locale = view.resources.configuration.locales[0] ?: Locale.getDefault()
         val use24Hour = DateFormat.is24HourFormat(view.context)
         if (format == null || formatLocale != locale || format24Hour != use24Hour) {
-            val pattern = DateFormat.getBestDateTimePattern(locale, if (use24Hour) "Hms" else "hms")
+            val time = if (use24Hour) "Hm" else "hm"
+            val pattern = DateFormat.getBestDateTimePattern(
+                locale, (if (options.weekday) "EEE" else "") + time + (if (showSeconds) "s" else ""),
+            )
             format = SimpleDateFormat(pattern, locale)
             formatLocale = locale
             format24Hour = use24Hour
@@ -113,8 +135,18 @@ internal class StatusBarClock(
         val formatter = checkNotNull(format)
         val zone = TimeZone.getDefault()
         if (formatter.timeZone != zone) formatter.timeZone = zone
-        val time = formatter.format(Date(now))
-        if (view.text.toString() != time) view.text = time
+        val seconds = FieldPosition(java.text.DateFormat.SECOND_FIELD)
+        val time = formatter.format(Date(now), StringBuffer(), seconds).toString()
+        val styled = showSeconds && options.dimSeconds && seconds.endIndex > seconds.beginIndex
+        if (styled) {
+            val tint = view.currentTextColor
+            val dim = Color.argb((Color.alpha(tint) * 0.55f).toInt(), Color.red(tint), Color.green(tint), Color.blue(tint))
+            view.text = SpannableString(time).apply {
+                setSpan(ForegroundColorSpan(dim), seconds.beginIndex, seconds.endIndex, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        } else if (view.text.toString() != time || view.text is android.text.Spanned) {
+            view.text = time
+        }
         if (view.contentDescription != time) view.contentDescription = time
     }
 }

@@ -24,7 +24,8 @@ import kotlin.math.roundToInt
 /** Draws in the status-bar overlay without participating in layout or touch dispatch. */
 internal class BatteryLine(
     private val host: View,
-    color: Int,
+    private val color: Int,
+    private val batteryColors: Boolean,
     private val animation: ChargingAnimation,
 ) : Drawable(), View.OnAttachStateChangeListener, View.OnLayoutChangeListener {
     private val paint = Paint().apply { this.color = color }
@@ -140,6 +141,13 @@ internal class BatteryLine(
     override fun draw(canvas: Canvas) {
         val width = bounds.width() * (level.toFloat() / FULL_LEVEL)
         if (width <= 0f || bounds.isEmpty) return
+        val alpha = paint.alpha
+        paint.color = if (!batteryColors || charging) color else when {
+            level <= 1500 -> 0xFFD32F2F.toInt()
+            level <= 3500 -> 0xFFF57C00.toInt()
+            else -> 0xFF32A852.toInt()
+        }
+        paint.alpha = alpha
 
         val now = SystemClock.uptimeMillis()
         val progress = ((now - animationStart) % CYCLE_MS).toFloat() / CYCLE_MS

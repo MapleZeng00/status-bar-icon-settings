@@ -3,6 +3,7 @@
     <string name="section_icons">状态栏图标</string>
     <string name="section_line">电量横线</string>
     <string name="section_clock">时间显示</string>
+    <string name="status_bar_options">状态栏进阶设置</string>
     <string name="section_advanced">高级选项</string>
     <string name="module_description">分别隐藏状态栏的移动网络、Wi-Fi、无 SIM 卡和电池图标。</string>
     <string name="hide_mobile">隐藏移动网络图标</string>

@@ -38,6 +38,8 @@ class SettingsActivity : Activity() {
     private lateinit var clockSeconds: Switch
     private lateinit var clockColor: Button
     private var selectedClockColor: Int? = null
+    private lateinit var optionsButton: Button
+    private var options = StatusBarOptions()
     private lateinit var debug: Switch
     private var prefs: SharedPreferences? = null
     private var generation = 0
@@ -101,6 +103,12 @@ class SettingsActivity : Activity() {
         updateClockColorButton()
 
         val advanced = settingsCard(content, R.string.section_advanced)
+        optionsButton = addAction(advanced) {
+            showStatusBarOptions(this, options) {
+                options = it
+                saveSettings()
+            }
+        }.apply { setText(R.string.status_bar_options) }
         debug = addToggle(advanced, R.string.debug_logs)
         advanced.addView(TextView(this).apply {
             textSize = 13f
@@ -224,6 +232,7 @@ class SettingsActivity : Activity() {
                     selectedClockColor = settings.clockColor
                     updateClockColorButton()
                     debug.isChecked = settings.debug
+                    options = settings.options
                     prefs = remote
                     setControls(true)
                 }
@@ -251,6 +260,7 @@ class SettingsActivity : Activity() {
             clockSeconds = clockSeconds.isChecked,
             clockColor = selectedClockColor,
             debug = debug.isChecked,
+            options = options,
         )
         showFeedback(R.string.saving)
         app.io.execute {
@@ -395,6 +405,8 @@ class SettingsActivity : Activity() {
         clockSeconds.isEnabled = enabled
         clockColor.isEnabled = enabled
         clockColor.alpha = if (enabled) 1f else 0.55f
+        optionsButton.isEnabled = enabled
+        optionsButton.alpha = if (enabled) 1f else 0.55f
         debug.isEnabled = enabled
     }
 }

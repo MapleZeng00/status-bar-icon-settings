@@ -28,6 +28,7 @@ internal data class IconSettings(
     val clockSeconds: Boolean,
     val clockColor: Int?,
     val debug: Boolean,
+    val options: StatusBarOptions,
 ) {
     fun save(prefs: SharedPreferences): Boolean = prefs.edit()
         .putBoolean("hide_mobile", hideMobile)
@@ -46,6 +47,7 @@ internal data class IconSettings(
             if (clockColor == null) remove("clock_color") else putInt("clock_color", clockColor)
         }
         .putBoolean("debug", debug)
+        .apply { options.save(this) }
         .commit()
 
     companion object {
@@ -63,6 +65,7 @@ internal data class IconSettings(
                 values["clock_seconds"] == true,
                 values["clock_color"] as? Int,
                 values["debug"] == true,
+                StatusBarOptions.read(values),
             )
         }
     }
