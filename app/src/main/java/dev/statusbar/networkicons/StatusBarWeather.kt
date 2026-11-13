@@ -28,6 +28,7 @@ internal class StatusBarWeather(
     private var generation = 0
     private var reserved = 0
     private var showCondition = false
+    private var rainNotice = false
     private var language = WeatherLanguage.SYSTEM
     private var latestReading: Reading? = null
     private val refresh = Runnable { readWeather() }
@@ -49,10 +50,11 @@ internal class StatusBarWeather(
         frame.removeView(label)
     }
 
-    fun configure(showCondition: Boolean, language: WeatherLanguage) {
-        if (this.showCondition == showCondition && this.language == language) return
+    fun configure(showCondition: Boolean, language: WeatherLanguage, rainNotice: Boolean) {
+        if (this.showCondition == showCondition && this.language == language && this.rainNotice == rainNotice) return
         this.showCondition = showCondition
         this.language = language
+        this.rainNotice = rainNotice
         show(latestReading)
     }
 
@@ -95,14 +97,18 @@ internal class StatusBarWeather(
             WeatherLanguage.ENGLISH -> "en"
         }
         val description = reading?.takeIf { showCondition }?.condition(selectedLanguage)
-        val display = if (description.isNullOrBlank()) temperature else {
+        val rain = reading?.rainProbability?.takeIf { rainNotice && it >= 60 &&
+            System.currentTimeMillis() - reading.publishedAt in 0..3_600_000L
+        }
+        val rainLabel = rain?.let { if (selectedLanguage == "zh") "1小时内降雨 $it%" else "Rain 1h $it%" }
+        val display = if (rainLabel != null) rainLabel else if (description.isNullOrBlank()) temperature else {
             val maxWidth = label.resources.displayMetrics.widthPixels * 0.30f
             val space = maxWidth - label.paint.measureText(" $temperature")
             val abbreviated = TextUtils.ellipsize(description, label.paint, space.coerceAtLeast(0f), TextUtils.TruncateAt.END)
             if (abbreviated.isEmpty()) temperature else "$abbreviated $temperature"
         }
         label.text = display
-        label.contentDescription = reading?.let { listOfNotNull(description, temperature).joinToString(" ") }
+        label.contentDescription = rainLabel ?: reading?.let { listOfNotNull(description, temperature).joinToString(" ") }
         label.visibility = if (reading == null) View.GONE else View.VISIBLE
         val next = if (reading == null) 0 else {
             label.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
@@ -120,6 +126,8 @@ internal class StatusBarWeather(
         val description: String?,
         val locale: String?,
         val code: Int?,
+        val rainProbability: Int?,
+        val publishedAt: Long,
     ) {
         fun condition(language: String): String? {
             val translated = when (language) {
@@ -152,7 +160,7 @@ internal class StatusBarWeather(
         val validTemperature = Regex("[+−-]?\\d{1,3}(?:[.,]\\d)?\\s*(?:℃|℉|°[CF]?)")
 
         fun read(context: Context): Reading? = try {
-            context.contentResolver.query(uri, arrayOf("temperature", "description", "locale", "weather_type"), null, null, null)
+            context.contentResolver.query(uri, null, null, null, null)
                 ?.use { rows ->
                     if (!rows.moveToFirst()) return@use null
                     val index = rows.getColumnIndex("temperature")
@@ -161,11 +169,15 @@ internal class StatusBarWeather(
                     val description = rows.getColumnIndex("description")
                     val locale = rows.getColumnIndex("locale")
                     val code = rows.getColumnIndex("weather_type")
+                    val rain = rows.getColumnIndex("next_hour_rain_probability")
+                    val published = rows.getColumnIndex("publish_time")
                     Reading(
                         temperature,
                         if (description >= 0) rows.getString(description)?.trim() else null,
                         if (locale >= 0) rows.getString(locale) else null,
                         if (code >= 0) rows.getString(code)?.toIntOrNull() else null,
+                        if (rain >= 0) rows.getString(rain)?.toIntOrNull()?.takeIf { it in 0..100 } else null,
+                        if (published >= 0) rows.getLong(published) else 0L,
                     )
                 }
         } catch (error: RuntimeException) {

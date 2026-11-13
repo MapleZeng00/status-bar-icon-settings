@@ -21,6 +21,16 @@ internal data class StatusBarOptions(
     val notificationApps: String? = null,
     val readingApps: String = "",
     val gamingApps: String = "",
+    val rainNotice: Boolean = false,
+    val speedGraph: Boolean = false,
+    val headphoneTrack: Boolean = false,
+    val timerLine: Boolean = false,
+    val hourlyStar: Boolean = false,
+    val chargeParticles: Boolean = false,
+    val secondClock: Boolean = false,
+    val privacyLabels: Boolean = false,
+    val secondClockZone: String = "Europe/London",
+    val secondClockApps: String = "",
 ) {
     fun save(editor: SharedPreferences.Editor) {
         editor.putBoolean("show_weather", showWeather)
@@ -39,6 +49,16 @@ internal data class StatusBarOptions(
             .putString("notification_apps", notificationApps)
             .putString("reading_apps", readingApps)
             .putString("gaming_apps", gamingApps)
+            .putBoolean("rain_notice", rainNotice)
+            .putBoolean("speed_graph", speedGraph)
+            .putBoolean("headphone_track", headphoneTrack)
+            .putBoolean("timer_line", timerLine)
+            .putBoolean("hourly_star", hourlyStar)
+            .putBoolean("charge_particles", chargeParticles)
+            .putBoolean("second_clock", secondClock)
+            .putBoolean("privacy_labels", privacyLabels)
+            .putString("second_clock_zone", secondClockZone)
+            .putString("second_clock_apps", secondClockApps)
     }
 
     companion object {
@@ -60,6 +80,16 @@ internal data class StatusBarOptions(
             notificationApps = values["notification_apps"] as? String,
             readingApps = values["reading_apps"] as? String ?: "",
             gamingApps = values["gaming_apps"] as? String ?: "",
+            rainNotice = values["rain_notice"] == true,
+            speedGraph = values["speed_graph"] == true,
+            headphoneTrack = values["headphone_track"] == true,
+            timerLine = values["timer_line"] == true,
+            hourlyStar = values["hourly_star"] == true,
+            chargeParticles = values["charge_particles"] == true,
+            secondClock = values["second_clock"] == true,
+            privacyLabels = values["privacy_labels"] == true,
+            secondClockZone = values["second_clock_zone"] as? String ?: "Europe/London",
+            secondClockApps = values["second_clock_apps"] as? String ?: "",
         )
     }
 }

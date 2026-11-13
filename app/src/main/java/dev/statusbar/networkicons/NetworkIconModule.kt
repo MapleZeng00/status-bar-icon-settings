@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.app.ActivityManager
+import android.app.Notification
 import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
@@ -42,7 +43,10 @@ class NetworkIconModule : XposedModule() {
 
     private val clockControllers = WeakHashMap<TextView, WeakReference<StatusBarClock>>()
     private var clockUpdate: Method? = null
-    private data class LineAppearance(val color: Int, val batteryColors: Boolean, val animation: ChargingAnimation)
+    private data class LineAppearance(
+        val color: Int, val batteryColors: Boolean, val animation: ChargingAnimation,
+        val showBattery: Boolean, val star: Boolean, val particles: Boolean,
+    )
     private data class ActiveLine(val appearance: LineAppearance, val drawable: WeakReference<BatteryLine>)
     private val lineHosts = WeakHashMap<View, ActiveLine?>()
     private val icons = WeakHashMap<View, IconState>()
@@ -63,6 +67,13 @@ class NetworkIconModule : XposedModule() {
     private val speedCheck = Runnable { refreshSpeed() }
     private val foregroundCheck = Runnable { refreshForeground() }
     private var applyingVisibility = false
+    private val extras = WeakHashMap<View, WeakReference<StatusBarExtras>>()
+    private val speedHistory = ArrayDeque<SpeedSample>()
+    @Volatile private var timerReader: (() -> TimerProgress?)? = null
+    @Volatile private var privacyReader: (() -> Set<String>)? = null
+    private var timer: TimerProgress? = null
+    private var foregroundApp: String? = null
+    private val extrasCheck = Runnable { install("Refresh status bar extras") { refreshExtras() } }
 
     private enum class Icon { MOBILE, WIFI, NO_SIM, BATTERY, SPEED, CLOCK, OTHER }
     private enum class Profile { READING, GAMING }
@@ -110,6 +121,8 @@ class NetworkIconModule : XposedModule() {
         install("Status bar layout") { hookStatusBarLayout(param.classLoader) }
         install("Clock gestures") { hookClockGestures() }
         install("Foreground app detection") { prepareForegroundReader(param.classLoader) }
+        install("System timer notifications") { prepareTimerReader(param.classLoader) }
+        install("Privacy indicators") { preparePrivacyReader(param.classLoader) }
         main.post(reload)
     }
 
@@ -123,6 +136,7 @@ class NetworkIconModule : XposedModule() {
         readingPackages = packageNames(next.options.readingApps)
         gamingPackages = packageNames(next.options.gamingApps)
         allowedPackages = next.options.notificationApps?.let(::packageNames)
+        if (!next.options.speedGraph) speedHistory.clear()
         main.removeCallbacks(foregroundCheck)
         refreshForeground(refresh = false)
         if (previous?.networkSpeedThreshold != next.networkSpeedThreshold ||
@@ -152,6 +166,7 @@ class NetworkIconModule : XposedModule() {
             if (view is ViewGroup) requestChildLayout(view)
             view.requestLayout()
         }
+        install("Refresh status bar extras") { refreshExtras() }
     }
 
     private fun requestChildLayout(group: ViewGroup) {
@@ -269,7 +284,7 @@ class NetworkIconModule : XposedModule() {
             return
         }
         weatherViews[host]?.get()?.let {
-            it.configure(current.options.showWeatherCondition, current.options.weatherLanguage)
+            it.configure(current.options.showWeatherCondition, current.options.weatherLanguage, current.options.rainNotice)
             return
         }
         val resources = host.resources
@@ -278,20 +293,29 @@ class NetworkIconModule : XposedModule() {
         val frame = contents.parent as? android.widget.FrameLayout ?: return
         if (contents.layoutParams !is android.widget.FrameLayout.LayoutParams) return
         val weather = StatusBarWeather(frame, contents)
-        weather.configure(current.options.showWeatherCondition, current.options.weatherLanguage)
+        weather.configure(current.options.showWeatherCondition, current.options.weatherLanguage, current.options.rainNotice)
         weatherTint?.let(weather::tint)
         weather.install()
         weatherViews[host] = WeakReference(weather)
     }
 
     private fun updateLine(view: View, settings: IconSettings) {
-        val appearance = LineAppearance(settings.batteryLineColor, settings.options.batteryColors, settings.chargingAnimation)
+        val options = settings.options
+        val showBattery = profile == Profile.READING || (profile == null && settings.batteryLine)
+        val star = profile == null && options.hourlyStar
+        val particles = profile == null && options.chargeParticles
+        val appearance = LineAppearance(
+            settings.batteryLineColor, options.batteryColors, settings.chargingAnimation, showBattery, star, particles,
+        )
         val previous = lineHosts[view]
-        val enabled = profile == Profile.READING || (profile == null && settings.batteryLine)
+        val enabled = showBattery || star || particles || (profile == null && options.timerLine)
         if (enabled && previous?.appearance == appearance && previous.drawable.get() != null) return
         previous?.drawable?.get()?.uninstall()
         lineHosts[view] = if (enabled) {
-            val line = BatteryLine(view, appearance.color, appearance.batteryColors, appearance.animation)
+            val line = BatteryLine(
+                view, appearance.color, appearance.batteryColors, appearance.animation, showBattery, star, particles,
+            )
+            line.timer = timer.takeIf { profile == null && options.timerLine }
             line.install()
             ActiveLine(appearance, WeakReference(line))
         } else null
@@ -376,6 +400,12 @@ class NetworkIconModule : XposedModule() {
             val view = chain.thisObject as? View
             if (view != null && Looper.myLooper() == Looper.getMainLooper() && icons[view]?.icon == Icon.SPEED) {
                 latestSpeed = networkSpeedKb(chain.getArg(0) as? String, chain.getArg(1) as? String)
+                if (settings?.options?.speedGraph == true && inPhoneStatusBar(view)) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (speedHistory.lastOrNull()?.let { now - it.at < 100 } == true) speedHistory.removeLast()
+                    speedHistory.addLast(SpeedSample(now, latestSpeed ?: 0.0))
+                    pruneSpeedHistory(now)
+                }
                 refreshSpeed()
             }
             result
@@ -548,7 +578,9 @@ class NetworkIconModule : XposedModule() {
 
     private fun refreshForeground(refresh: Boolean = true) {
         val host = lineHosts.keys.firstOrNull { it.isAttachedToWindow }
-        val enabled = (readingPackages.isNotEmpty() || gamingPackages.isNotEmpty()) && foregroundReader != null
+        val options = settings?.options
+        val scopedClock = options?.secondClock == true && options.secondClockApps.isNotBlank()
+        val enabled = (readingPackages.isNotEmpty() || gamingPackages.isNotEmpty() || scopedClock) && foregroundReader != null
         val app = if (enabled && host?.context?.getSystemService(PowerManager::class.java)?.isInteractive == true) {
             try {
                 foregroundReader?.invoke()
@@ -558,6 +590,7 @@ class NetworkIconModule : XposedModule() {
                 null
             }
         } else null
+        foregroundApp = app
         val next = when (app) {
             in gamingPackages -> Profile.GAMING
             in readingPackages -> Profile.READING
@@ -571,6 +604,120 @@ class NetworkIconModule : XposedModule() {
             }
         }
         if (enabled && foregroundReader != null) main.postDelayed(foregroundCheck, 1000)
+    }
+
+    private fun pruneSpeedHistory(now: Long) {
+        while (speedHistory.firstOrNull()?.let { now - it.at > 10_000 } == true) speedHistory.removeFirst()
+    }
+
+    private fun refreshExtras() {
+        main.removeCallbacks(extrasCheck)
+        val options = settings?.options ?: return
+        val hostList = lineHosts.keys.filter { it.isAttachedToWindow }
+        val uiEnabled = options.speedGraph || options.headphoneTrack || options.secondClock || options.privacyLabels
+        if (uiEnabled || options.timerLine) main.postDelayed(extrasCheck, 1000)
+        val interactive = hostList.firstOrNull()?.context?.getSystemService(PowerManager::class.java)?.isInteractive == true
+        timer = null
+        if (options.timerLine && interactive && profile == null) {
+            install("Read system timer") { timer = timerReader?.invoke() }
+        }
+        lineHosts.values.forEach { it?.drawable?.get()?.timer = timer }
+        if (!uiEnabled || !interactive || (profile != null && !options.privacyLabels)) {
+            extras.values.forEach { it.get()?.clear() }
+            return
+        }
+        val uiOptions = if (profile == null) options else StatusBarOptions(privacyLabels = options.privacyLabels)
+        pruneSpeedHistory(SystemClock.elapsedRealtime())
+        var privacyKinds = emptySet<String>()
+        if (uiOptions.privacyLabels) install("Read privacy indicators") {
+            privacyKinds = privacyReader?.invoke().orEmpty()
+        }
+        val clockApps = packageNames(uiOptions.secondClockApps)
+        for (host in hostList) install("Status bar extras") {
+            val controller = extras[host]?.get() ?: StatusBarExtras(host).also {
+                extras[host] = WeakReference(it)
+                host.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: View) = Unit
+                    override fun onViewDetachedFromWindow(view: View) = it.clear()
+                })
+            }
+            val clockId = host.resources.getIdentifier("clock", "id", SYSTEM_UI)
+            val clock = host.findViewById<View>(clockId) as? TextView ?: clockControllers.keys.firstOrNull {
+                it.isShown && generateSequence<View>(it) { view -> view.parent as? View }.any { it === host }
+            }
+            val speedView = speedMirror?.get()?.takeIf { it.isShown }
+                ?: icons.entries.firstOrNull { (view, state) ->
+                    state.icon == Icon.SPEED && view.isShown &&
+                        generateSequence(view) { it.parent as? View }.any { it === host }
+                }?.key
+            controller.update(
+                uiOptions, clock, speedView,
+                clockApps.isEmpty() || foregroundApp in clockApps, speedHistory.toList(), !speedBlocked && speedView != null,
+                privacyKinds, weatherTint?.defaultColor ?: clock?.currentTextColor ?: -1,
+            )
+        }
+    }
+
+    private fun prepareTimerReader(loader: ClassLoader) {
+        val prefix = "com.android.systemui.statusbar.notification.collection."
+        val collection = Class.forName(prefix + "NotifCollection", false, loader)
+        val entry = Class.forName(prefix + "NotificationEntry", false, loader)
+        val entries = collection.getDeclaredField("mReadOnlyNotificationSet").apply { isAccessible = true }
+        val sbn = entry.getDeclaredField("mSbn").apply { isAccessible = true }
+        for (constructor in collection.declaredConstructors) {
+            hook(constructor).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+                val result = chain.proceed()
+                val instance = chain.thisObject
+                if (instance != null) {
+                    if (settings?.debug == true) report(Log.DEBUG, "System timer source attached")
+                    timerReader = {
+                        val now = SystemClock.elapsedRealtime()
+                        val wall = System.currentTimeMillis()
+                        (entries.get(instance) as? Collection<*>).orEmpty().asSequence()
+                            .mapNotNull { sbn.get(it) as? StatusBarNotification }
+                            .filter { it.packageName == "com.android.deskclock" }
+                            .mapNotNull { record ->
+                                val notification = record.notification
+                                val isTimer = notification.channelId == "channel_id_deskclock_timer" ||
+                                    notification.category == Notification.CATEGORY_STOPWATCH
+                                val countdown = notification.extras?.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN) == true &&
+                                    notification.extras?.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) == true
+                                val remaining = notification.`when` - wall
+                                val duration = notification.`when` - record.postTime
+                                if (isTimer && countdown && remaining > 0 && duration > 0) {
+                                    TimerProgress(now + remaining, duration)
+                                } else null
+                            }.minByOrNull { it.end }
+                    }
+                }
+                result
+            }
+        }
+    }
+
+    private fun preparePrivacyReader(loader: ClassLoader) {
+        val prefix = "com.android.systemui.privacy."
+        val controller = Class.forName(prefix + "PrivacyItemController", false, loader)
+        val item = Class.forName(prefix + "PrivacyItem", false, loader)
+        val list = controller.getDeclaredField("privacyList").apply { isAccessible = true }
+        val type = item.getDeclaredField("privacyType").apply { isAccessible = true }
+        val paused = item.getDeclaredField("paused").apply { isAccessible = true }
+        for (constructor in controller.declaredConstructors) {
+            hook(constructor).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+                val result = chain.proceed()
+                val instance = chain.thisObject
+                if (instance != null) {
+                    if (settings?.debug == true) report(Log.DEBUG, "Privacy source attached")
+                    privacyReader = {
+                        val snapshot = synchronized(instance) { (list.get(instance) as? List<*>).orEmpty().toList() }
+                        snapshot.mapNotNull { reading ->
+                            if (reading == null || paused.getBoolean(reading)) null else (type.get(reading) as? Enum<*>)?.name
+                        }.toSet()
+                    }
+                }
+                result
+            }
+        }
     }
 
     private fun hookClockGestures() {
