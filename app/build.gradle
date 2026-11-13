@@ -8,7 +8,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'dev.statusbar.networkicons'
+        applicationId 'io.github.iammaplezeng.statusbaricons'
         minSdk 28
         targetSdk 34
         versionCode 25

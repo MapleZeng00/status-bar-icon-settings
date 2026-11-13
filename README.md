@@ -6,7 +6,7 @@
 
 1. 在手机上确认 SukiSU Ultra 和当前的 Zygisk 实现已正常运行。在 LSPosed 管理器中确认官方 LSPosed 2.2.1（7912）显示已激活。保留 LSPosed 安全模式，并确认已有可用的 USB 调试授权或可访问 SukiSU 管理器，方便恢复。
 2. 按照下文构建 Debug APK，再安装 `app/build/outputs/apk/debug/app-debug.apk`。也可以使用 `adb install -r app/build/outputs/apk/debug/app-debug.apk`。
-   从旧版升级时可直接覆盖安装，保留原有配置。
+   从使用相同包名和签名的版本升级时可以覆盖安装。LSPosed 仓库版使用包名 `io.github.iammaplezeng.statusbaricons`，首次从 `dev.statusbar.networkicons` 版切换时，请在 LSPosed 停用旧模块并重新配置新版。
 3. 在 LSPosed 管理器的「模块」中启用「Status Bar Icon Settings」。在作用域中只勾选「系统界面」(`com.android.systemui`)。作用域限制为这个包，实际 Hook 进一步限制为同名主进程。
 4. 首次启用或升级后，在 LSPosed 重新加载系统界面一次，也可重启手机。打开桌面上的「Status Bar Icon Settings」。连接状态应显示框架版本和 API 102。如果显示等待服务，检查模块是否已启用、作用域是否已保存，以及框架重启后是否仍激活。
 5. 按下表测试。调整开关或选择颜色时自动保存。SystemUI 收到新设置后会更新正在显示的状态栏。
@@ -106,7 +106,7 @@ adb shell dumpsys package com.android.systemui
 - `Battery line attached` 表示横线已附着到状态栏，可通过 `adb logcat -d -s NetworkStatusIcons` 查看。
 - 若出现 `path unavailable` 或 `path incompatible`，保留 ROM 版本、地区、SystemUI 版本和相关日志。
 
-- 回退时，在 LSPosed 管理器停用本模块并重启。若 SystemUI 反复崩溃而无法打开管理器，可从已授权的电脑执行 `adb uninstall dev.statusbar.networkicons`，卸载成功后执行 `adb reboot`。如果手机端只能访问 SukiSU 管理器，也可以暂时停用 LSPosed 并重启。该操作会暂停其他 LSPosed 模块。
+- 回退时，在 LSPosed 管理器停用本模块并重启。若 SystemUI 反复崩溃而无法打开管理器，可从已授权的电脑执行 `adb uninstall io.github.iammaplezeng.statusbaricons`，卸载成功后执行 `adb reboot`。如果手机端只能访问 SukiSU 管理器，也可以暂时停用 LSPosed 并重启。该操作会暂停其他 LSPosed 模块。
 
 ## 构建
 
