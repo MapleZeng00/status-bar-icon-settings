@@ -1,6 +1,7 @@
 package dev.statusbar.networkicons
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.text.TextUtils
@@ -24,6 +25,7 @@ internal class StatusBarWeather(
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         visibility = View.GONE
     }
+    val view: View get() = label
     private var active = false
     private var generation = 0
     private var reserved = 0
@@ -60,6 +62,16 @@ internal class StatusBarWeather(
 
     fun tint(colors: ColorStateList) {
         label.setTextColor(colors)
+    }
+
+    fun openApp() {
+        val context = label.context
+        val intent = context.packageManager.getLaunchIntentForPackage(WEATHER_PACKAGE)
+        if (intent == null) {
+            Log.w(LOG_TAG, "Xiaomi Weather launcher unavailable")
+            return
+        }
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     override fun onViewAttachedToWindow(view: View) {
@@ -142,6 +154,7 @@ internal class StatusBarWeather(
     }
 
     private companion object {
+        const val WEATHER_PACKAGE = "com.miui.weather2"
         val reader = Executors.newSingleThreadExecutor()
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         val uri = Uri.parse("content://weather/weather")

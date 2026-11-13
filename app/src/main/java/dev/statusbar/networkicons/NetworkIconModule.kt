@@ -56,7 +56,7 @@ class NetworkIconModule : XposedModule() {
     private var gamingPackages = emptySet<String>()
     private var allowedPackages: Set<String>? = null
     private var secondsOverride: Boolean? = null
-    private val clockGestures = WeakHashMap<View, GestureDetector>()
+    private val statusBarGestures = WeakHashMap<View, GestureDetector>()
     private var speedBlocked = false
     private var slowSince: Long? = null
     private var latestSpeed: Double? = null
@@ -119,7 +119,7 @@ class NetworkIconModule : XposedModule() {
         install("Battery line") { hookBatteryLine(param.classLoader) }
         install("Status bar clock") { hookStatusBarClock(param.classLoader) }
         install("Status bar layout") { hookStatusBarLayout(param.classLoader) }
-        install("Clock gestures") { hookClockGestures() }
+        install("Status bar gestures") { hookStatusBarGestures() }
         install("Foreground app detection") { prepareForegroundReader(param.classLoader) }
         install("System timer notifications") { prepareTimerReader(param.classLoader) }
         install("Privacy indicators") { preparePrivacyReader(param.classLoader) }
@@ -720,22 +720,22 @@ class NetworkIconModule : XposedModule() {
         }
     }
 
-    private fun hookClockGestures() {
+    private fun hookStatusBarGestures() {
         val target = ViewGroup::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
         hook(target).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
             val host = chain.thisObject as? View
             val event = chain.getArg(0) as? MotionEvent
             if (host != null && event != null && host in lineHosts &&
-                settings?.options?.clockGestures == true
+                (settings?.options?.clockGestures == true || weatherViews[host]?.get() != null)
             ) {
-                val detector = clockGestures.getOrPut(host) { createClockGestureDetector(host) }
+                val detector = statusBarGestures.getOrPut(host) { createStatusBarGestureDetector(host) }
                 detector.onTouchEvent(event)
             }
             chain.proceed()
         }
     }
 
-    private fun createClockGestureDetector(host: View): GestureDetector {
+    private fun createStatusBarGestureDetector(host: View): GestureDetector {
         val hostRef = WeakReference(host)
         val listener = object : GestureDetector.SimpleOnGestureListener() {
             private fun clockAt(event: MotionEvent): TextView? {
@@ -746,18 +746,19 @@ class NetworkIconModule : XposedModule() {
                         generateSequence(clock as View) { it.parent as? View }.none { it === targetHost }
                     ) return@firstOrNull false
 
-                    val bounds = android.graphics.Rect()
-                    if (!clock.getGlobalVisibleRect(bounds)) return@firstOrNull false
-                    val rootPosition = IntArray(2)
-                    clock.rootView.getLocationOnScreen(rootPosition)
-                    bounds.offset(rootPosition[0], rootPosition[1])
-                    bounds.contains(event.rawX.toInt(), event.rawY.toInt())
+                    containsTouch(clock, event)
                 }
             }
 
-            override fun onDown(event: MotionEvent): Boolean = clockAt(event) != null
+            private fun weatherAt(event: MotionEvent): StatusBarWeather? {
+                val targetHost = hostRef.get()?.takeIf { it.isAttachedToWindow } ?: return null
+                return weatherViews[targetHost]?.get()?.takeIf { containsTouch(it.view, event) }
+            }
+
+            override fun onDown(event: MotionEvent): Boolean = weatherAt(event) != null || clockAt(event) != null
 
             override fun onSingleTapUp(event: MotionEvent): Boolean {
+                if (weatherAt(event) != null) return false
                 val clock = clockAt(event) ?: return false
                 val current = settings ?: return false
                 val controller = clockControllers[clock]?.get() ?: return false
@@ -767,6 +768,11 @@ class NetworkIconModule : XposedModule() {
             }
 
             override fun onLongPress(event: MotionEvent) {
+                val weather = weatherAt(event)
+                if (weather != null) {
+                    install("Open Xiaomi Weather") { weather.openApp() }
+                    return
+                }
                 val clock = clockAt(event) ?: return
                 install("Open alarms") {
                     val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
@@ -780,6 +786,16 @@ class NetworkIconModule : XposedModule() {
             // SimpleOnGestureListener also implements OnDoubleTapListener.
             setOnDoubleTapListener(null)
         }
+    }
+
+    private fun containsTouch(view: View, event: MotionEvent): Boolean {
+        if (!view.isShown || !view.isAttachedToWindow) return false
+        val bounds = android.graphics.Rect()
+        if (!view.getGlobalVisibleRect(bounds)) return false
+        val rootPosition = IntArray(2)
+        view.rootView.getLocationOnScreen(rootPosition)
+        bounds.offset(rootPosition[0], rootPosition[1])
+        return bounds.contains(event.rawX.toInt(), event.rawY.toInt())
     }
 
     // Limit the alternate child order to measurement and layout calls. OEM icon indices stay intact.
