@@ -191,25 +191,29 @@ class NetworkIconModule : XposedModule() {
                         weatherTint = view.textColors
                         weatherViews.values.forEach { it.get()?.tint(view.textColors) }
                     }
-                    settings?.let { current ->
-                        controller?.configure(
-                            secondsOverride ?: current.clockSeconds,
-                            current.clockColor,
-                            current.options,
-                        )
-                    }
+                    if (controller != null) updateClockDisplay(controller)
                     if (view != null && controller != null) {
                         trackIcon(view, Icon.CLOCK)
                         if (method.name == "onAttachedToWindow" && settings?.options?.speedByClock == true) {
                             main.post { install("Network speed beside clock") { updateSpeedMirror() } }
                         }
                     }
-                    controller?.refresh()
                     result
                 }
                 if (settings?.debug == true) report(Log.DEBUG, "Status bar clock signature: $method")
             }
         }
+    }
+
+    private fun updateClockDisplay(controller: StatusBarClock) {
+        val current = settings ?: return
+        controller.configure(
+            secondsOverride ?: current.clockSeconds,
+            current.clockColor,
+            current.options,
+            forceMinutes = secondsOverride == false,
+        )
+        controller.refresh()
     }
 
     private fun isMainClock(view: TextView): Boolean = try {
@@ -609,8 +613,9 @@ class NetworkIconModule : XposedModule() {
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 val clock = clockAt(event) ?: return false
                 val current = settings ?: return false
+                val controller = clockControllers[clock]?.get() ?: return false
                 secondsOverride = !(secondsOverride ?: current.clockSeconds)
-                main.post { install("Toggle clock seconds") { clockUpdate?.invoke(clock) } }
+                install("Toggle clock seconds") { updateClockDisplay(controller) }
                 return true
             }
 

@@ -28,6 +28,8 @@ internal class StatusBarClock(
     private var originalFontFeatures: String? = null
     private var tabularApplied = false
     private var showSeconds = false
+    private var forceMinutes = false
+    private var clearRenderedSeconds = false
     private var color: Int? = null
     private var systemColor: ColorStateList? = null
     private var format: SimpleDateFormat? = null
@@ -55,8 +57,9 @@ internal class StatusBarClock(
         systemColor = null
     }
 
-    fun configure(seconds: Boolean, customColor: Int?, next: StatusBarOptions) {
-        if (options != next) format = null
+    fun configure(seconds: Boolean, customColor: Int?, next: StatusBarOptions, forceMinutes: Boolean) {
+        if (showSeconds != seconds || options.weekday != next.weekday) format = null
+        this.forceMinutes = forceMinutes
         options = next
         if (next.tabularClock != tabularApplied) {
             if (next.tabularClock) {
@@ -70,6 +73,7 @@ internal class StatusBarClock(
         if (color != customColor) restoreSystemColor()
         color = customColor
         if (showSeconds != seconds) {
+            clearRenderedSeconds = !seconds
             showSeconds = seconds
             if (!seconds) onViewDetachedFromWindow(view)
             else if (view.isAttachedToWindow) onViewAttachedToWindow(view)
@@ -120,7 +124,7 @@ internal class StatusBarClock(
             if (systemColor == null) systemColor = view.textColors
             if (view.currentTextColor != custom) view.setTextColor(custom)
         }
-        if (!showSeconds && !options.weekday) return
+        if (!showSeconds && !options.weekday && !forceMinutes && !clearRenderedSeconds) return
         val locale = view.resources.configuration.locales[0] ?: Locale.getDefault()
         val use24Hour = DateFormat.is24HourFormat(view.context)
         if (format == null || formatLocale != locale || format24Hour != use24Hour) {
@@ -148,5 +152,6 @@ internal class StatusBarClock(
             view.text = time
         }
         if (view.contentDescription != time) view.contentDescription = time
+        clearRenderedSeconds = false
     }
 }
