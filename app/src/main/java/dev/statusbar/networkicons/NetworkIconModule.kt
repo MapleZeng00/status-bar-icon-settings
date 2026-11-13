@@ -36,12 +36,13 @@ class NetworkIconModule : XposedModule() {
     private val icons = WeakHashMap<View, IconState>()
     private var applyingVisibility = false
 
-    private enum class Icon { MOBILE, WIFI, NO_SIM, BATTERY }
+    private enum class Icon { MOBILE, WIFI, NO_SIM, BATTERY, SPEED }
 
     private data class IconState(
         val icon: Icon,
         var visibility: Int,
         var hidden: Boolean = false,
+        var speedKb: Double? = null,
     )
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -72,6 +73,7 @@ class NetworkIconModule : XposedModule() {
                 hookNetworkIcons(param.classLoader)
                 hookNetworkIconMeasurement(param.classLoader)
             }
+            install("Network speed") { hookNetworkSpeed(param.classLoader) }
             install("Battery icon") { hookBatteryMeter(param.classLoader) }
         }
         install("Battery line") { hookBatteryLine(param.classLoader) }
@@ -226,6 +228,7 @@ class NetworkIconModule : XposedModule() {
                     "mobile", "demo_mobile" -> Icon.MOBILE
                     "wifi", "demo_wifi" -> Icon.WIFI
                     "no_sim" -> Icon.NO_SIM
+                    "network_speed" -> Icon.SPEED
                     else -> null
                 }
                 if (icon != null) trackIcon(view, icon)
@@ -238,6 +241,7 @@ class NetworkIconModule : XposedModule() {
         // MIUI measures icons using StatusIconDisplayable.isIconVisible(), even for GONE views.
         val classes = listOf(
             "com.android.systemui.statusbar.StatusBarIconView",
+            "com.android.systemui.statusbar.views.NetworkSpeedView",
             "com.android.systemui.statusbar.pipeline.shared.ui.view.ModernStatusBarView",
         )
         for (name in classes) {
@@ -255,6 +259,24 @@ class NetworkIconModule : XposedModule() {
                     }
                 }
             }
+        }
+    }
+
+    private fun hookNetworkSpeed(loader: ClassLoader) {
+        val meter = Class.forName("com.android.systemui.statusbar.views.NetworkSpeedView", false, loader)
+        val method = meter.getDeclaredMethod("setNetworkSpeed", String::class.java, String::class.java)
+        check(method.returnType == Void.TYPE)
+        hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+            val result = chain.proceed()
+            val view = chain.thisObject as? View
+            if (view != null && Looper.myLooper() == Looper.getMainLooper()) {
+                val state = icons[view]
+                if (state?.icon == Icon.SPEED) {
+                    state.speedKb = networkSpeedKb(chain.getArg(0) as? String, chain.getArg(1) as? String)
+                    applyIcon(view, state)
+                }
+            }
+            result
         }
     }
 
@@ -285,6 +307,11 @@ class NetworkIconModule : XposedModule() {
             Icon.WIFI -> current.hideWifi
             Icon.NO_SIM -> current.hideNoSim
             Icon.BATTERY -> current.hideBattery
+            Icon.SPEED -> {
+                val threshold = current.networkSpeedThreshold
+                val speed = state.speedKb
+                threshold != null && speed != null && speed <= threshold
+            }
         }
         if (hide == state.hidden) return
         if (hide) state.visibility = view.visibility

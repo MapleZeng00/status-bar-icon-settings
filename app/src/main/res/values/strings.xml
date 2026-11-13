@@ -9,6 +9,12 @@
     <string name="hide_wifi">隐藏 Wi-Fi 图标</string>
     <string name="hide_no_sim">隐藏无 SIM 卡图标</string>
     <string name="hide_battery">隐藏电池图标（含电量数字）</string>
+    <string name="choose_speed_threshold">网速显示门槛</string>
+    <string name="speed_threshold_value">网速显示门槛（%1$d KB/s）</string>
+    <string name="speed_threshold_default">网速显示门槛（跟随系统）</string>
+    <string name="speed_threshold_unit">KB/s</string>
+    <string name="speed_threshold_info">网速高于设定值时显示。请先在系统设置中开启实时网速。</string>
+    <string name="speed_threshold_invalid">请输入 0 至 2147483647 的整数</string>
     <string name="battery_line">横线显示电量</string>
     <string name="battery_line_color">横线颜色（%1$s）</string>
     <string name="choose_line_color">选择横线颜色</string>

@@ -8,10 +8,12 @@ import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
+import android.text.InputType
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -26,6 +28,8 @@ class SettingsActivity : Activity() {
     private lateinit var wifi: Switch
     private lateinit var noSim: Switch
     private lateinit var battery: Switch
+    private lateinit var speedThreshold: Button
+    private var selectedSpeedThreshold: Int? = null
     private lateinit var batteryLine: Switch
     private lateinit var lineColor: Button
     private lateinit var chargingAnimation: Button
@@ -81,6 +85,8 @@ class SettingsActivity : Activity() {
         wifi = addToggle(icons, R.string.hide_wifi)
         noSim = addToggle(icons, R.string.hide_no_sim)
         battery = addToggle(icons, R.string.hide_battery)
+        speedThreshold = addAction(icons) { chooseSpeedThreshold() }
+        updateSpeedThresholdButton()
 
         val line = settingsCard(content, R.string.section_line, filled = true)
         batteryLine = addToggle(line, R.string.battery_line)
@@ -207,6 +213,8 @@ class SettingsActivity : Activity() {
                     wifi.isChecked = settings.hideWifi
                     noSim.isChecked = settings.hideNoSim
                     battery.isChecked = settings.hideBattery
+                    selectedSpeedThreshold = settings.networkSpeedThreshold
+                    updateSpeedThresholdButton()
                     batteryLine.isChecked = settings.batteryLine
                     selectedColor = settings.batteryLineColor
                     updateColorButton()
@@ -236,6 +244,7 @@ class SettingsActivity : Activity() {
             hideWifi = wifi.isChecked,
             hideNoSim = noSim.isChecked,
             hideBattery = battery.isChecked,
+            networkSpeedThreshold = selectedSpeedThreshold,
             batteryLine = batteryLine.isChecked,
             batteryLineColor = selectedColor,
             chargingAnimation = selectedAnimation,
@@ -256,6 +265,52 @@ class SettingsActivity : Activity() {
                 showFeedback(if (saved) R.string.saved else R.string.save_failed)
             }
         }
+    }
+
+    private fun chooseSpeedThreshold() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+            setHint(R.string.speed_threshold_unit)
+            setText(selectedSpeedThreshold?.toString().orEmpty())
+            selectAll()
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), 0)
+            addView(TextView(this@SettingsActivity).apply {
+                setText(R.string.speed_threshold_info)
+            })
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.choose_speed_threshold)
+            .setView(panel)
+            .setNeutralButton(R.string.system_clock_color) { _, _ -> setSpeedThreshold(null) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val value = input.text.toString().toIntOrNull()
+            if (value == null || value < 0) {
+                input.error = getString(R.string.speed_threshold_invalid)
+            } else {
+                setSpeedThreshold(value)
+                dialog.dismiss()
+            }
+        }
+    }
+
+    private fun setSpeedThreshold(value: Int?) {
+        selectedSpeedThreshold = value
+        updateSpeedThresholdButton()
+        saveSettings()
+    }
+
+    private fun updateSpeedThresholdButton() {
+        speedThreshold.text = selectedSpeedThreshold?.let {
+            getString(R.string.speed_threshold_value, it)
+        } ?: getString(R.string.speed_threshold_default)
     }
 
     private fun chooseLineColor() {
@@ -333,6 +388,8 @@ class SettingsActivity : Activity() {
         wifi.isEnabled = enabled
         noSim.isEnabled = enabled
         battery.isEnabled = enabled
+        speedThreshold.isEnabled = enabled
+        speedThreshold.alpha = if (enabled) 1f else 0.55f
         batteryLine.isEnabled = enabled
         updateBatteryButtons()
         clockSeconds.isEnabled = enabled
