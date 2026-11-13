@@ -8,4 +8,3 @@ local.properties
 *.apk
 *.jks
 *.keystore
-wechat_support_qr.*
