@@ -28,6 +28,7 @@ internal class StatusBarClock(
     private var originalFontFeatures: String? = null
     private var tabularApplied = false
     private var showSeconds = false
+    private var dimSeconds = false
     private var color: Int? = null
     private var systemColor: ColorStateList? = null
     private var format: SimpleDateFormat? = null
@@ -55,7 +56,8 @@ internal class StatusBarClock(
         systemColor = null
     }
 
-    fun configure(seconds: Boolean, customColor: Int?, next: StatusBarOptions) {
+    fun configure(seconds: Boolean, customColor: Int?, next: StatusBarOptions, dim: Boolean) {
+        dimSeconds = dim
         if (options != next) format = null
         options = next
         if (next.tabularClock != tabularApplied) {
@@ -137,7 +139,7 @@ internal class StatusBarClock(
         if (formatter.timeZone != zone) formatter.timeZone = zone
         val seconds = FieldPosition(java.text.DateFormat.SECOND_FIELD)
         val time = formatter.format(Date(now), StringBuffer(), seconds).toString()
-        val styled = showSeconds && options.dimSeconds && seconds.endIndex > seconds.beginIndex
+        val styled = showSeconds && dimSeconds && seconds.endIndex > seconds.beginIndex
         if (styled) {
             val tint = view.currentTextColor
             val dim = Color.argb((Color.alpha(tint) * 0.55f).toInt(), Color.red(tint), Color.green(tint), Color.blue(tint))

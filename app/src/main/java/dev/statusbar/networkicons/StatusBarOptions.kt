@@ -2,8 +2,12 @@ package dev.statusbar.networkicons
 
 import android.content.SharedPreferences
 
+internal enum class WeatherLanguage { SYSTEM, CHINESE, ENGLISH }
+
 internal data class StatusBarOptions(
     val showWeather: Boolean = false,
+    val showWeatherCondition: Boolean = false,
+    val weatherLanguage: WeatherLanguage = WeatherLanguage.SYSTEM,
     val speedColors: Boolean = false,
     val speedSmoothing: Boolean = false,
     val batteryColors: Boolean = false,
@@ -20,6 +24,8 @@ internal data class StatusBarOptions(
 ) {
     fun save(editor: SharedPreferences.Editor) {
         editor.putBoolean("show_weather", showWeather)
+            .putBoolean("show_weather_condition", showWeatherCondition)
+            .putString("weather_language", weatherLanguage.name)
             .putBoolean("speed_colors", speedColors)
             .putBoolean("speed_smoothing", speedSmoothing)
             .putBoolean("battery_colors", batteryColors)
@@ -38,6 +44,9 @@ internal data class StatusBarOptions(
     companion object {
         fun read(values: Map<String, *>): StatusBarOptions = StatusBarOptions(
             showWeather = values["show_weather"] == true,
+            showWeatherCondition = values["show_weather_condition"] == true,
+            weatherLanguage = WeatherLanguage.entries.firstOrNull { it.name == values["weather_language"] }
+                ?: WeatherLanguage.SYSTEM,
             speedColors = values["speed_colors"] == true,
             speedSmoothing = values["speed_smoothing"] == true,
             batteryColors = values["battery_colors"] == true,

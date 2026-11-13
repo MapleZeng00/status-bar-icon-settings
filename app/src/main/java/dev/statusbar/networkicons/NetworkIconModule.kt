@@ -1,12 +1,13 @@
 package dev.statusbar.networkicons
 
-import android.content.SharedPreferences
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.app.ActivityManager
 import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.GestureDetector
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -52,7 +53,8 @@ class NetworkIconModule : XposedModule() {
     private var gamingPackages = emptySet<String>()
     private var allowedPackages: Set<String>? = null
     private var secondsOverride: Boolean? = null
-    private var clockTouch: ClockTouch? = null
+    private var dimSecondsOverride: Boolean? = null
+    private val clockGestures = WeakHashMap<View, GestureDetector>()
     private var speedBlocked = false
     private var slowSince: Long? = null
     private var latestSpeed: Double? = null
@@ -66,7 +68,6 @@ class NetworkIconModule : XposedModule() {
 
     private enum class Icon { MOBILE, WIFI, NO_SIM, BATTERY, SPEED, CLOCK, OTHER }
     private enum class Profile { READING, GAMING }
-    private data class ClockTouch(val x: Float, val y: Float, val time: Long)
 
     private data class IconState(
         val icon: Icon,
@@ -119,6 +120,9 @@ class NetworkIconModule : XposedModule() {
         val previous = settings
         settings = next
         if (previous?.clockSeconds != next.clockSeconds || !next.options.clockGestures) secondsOverride = null
+        if (previous?.options?.dimSeconds != next.options.dimSeconds || !next.options.clockGestures) {
+            dimSecondsOverride = null
+        }
         if (previous != next) report(Log.INFO, "Live settings received")
         if (next.debug) report(Log.DEBUG, "Status bar settings refreshed")
         readingPackages = packageNames(next.options.readingApps)
@@ -193,7 +197,12 @@ class NetworkIconModule : XposedModule() {
                         weatherViews.values.forEach { it.get()?.tint(view.textColors) }
                     }
                     settings?.let { current ->
-                        controller?.configure(secondsOverride ?: current.clockSeconds, current.clockColor, current.options)
+                        controller?.configure(
+                            secondsOverride ?: current.clockSeconds,
+                            current.clockColor,
+                            current.options,
+                            dimSecondsOverride ?: current.options.dimSeconds,
+                        )
                     }
                     if (view != null && controller != null) {
                         trackIcon(view, Icon.CLOCK)
@@ -261,13 +270,17 @@ class NetworkIconModule : XposedModule() {
             weatherViews.remove(host)?.get()?.uninstall()
             return
         }
-        if (weatherViews[host]?.get() != null) return
+        weatherViews[host]?.get()?.let {
+            it.configure(current.options.showWeatherCondition, current.options.weatherLanguage)
+            return
+        }
         val resources = host.resources
         val contentsId = resources.getIdentifier("status_bar_contents", "id", SYSTEM_UI)
         val contents = host.findViewById<View>(contentsId) ?: return
         val frame = contents.parent as? android.widget.FrameLayout ?: return
         if (contents.layoutParams !is android.widget.FrameLayout.LayoutParams) return
         val weather = StatusBarWeather(frame, contents)
+        weather.configure(current.options.showWeatherCondition, current.options.weatherLanguage)
         weatherTint?.let(weather::tint)
         weather.install()
         weatherViews[host] = WeakReference(weather)
@@ -567,54 +580,90 @@ class NetworkIconModule : XposedModule() {
         hook(target).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
             val host = chain.thisObject as? View
             val event = chain.getArg(0) as? MotionEvent
-            if (host != null && event != null && host in lineHosts && settings?.options?.clockGestures == true) {
-                val clock = clockControllers.keys.firstOrNull { it.isShown && it.isAttachedToWindow }
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        val bounds = android.graphics.Rect()
-                        val position = IntArray(2)
-                        if (clock?.getGlobalVisibleRect(bounds) == true) {
-                            clock.rootView.getLocationOnScreen(position)
-                            bounds.offset(position[0], position[1])
-                        }
-                        clockTouch = if (bounds.contains(event.rawX.toInt(), event.rawY.toInt())) {
-                            ClockTouch(event.rawX, event.rawY, event.eventTime)
-                        } else null
-                    }
-                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> {
-                        clockTouch?.let { start ->
-                            val slop = ViewConfiguration.get(host.context).scaledTouchSlop
-                            if (event.pointerCount > 1 || kotlin.math.abs(event.rawX - start.x) > slop ||
-                                kotlin.math.abs(event.rawY - start.y) > slop
-                            ) clockTouch = null
-                        }
-                    }
-                    MotionEvent.ACTION_CANCEL -> clockTouch = null
-                    MotionEvent.ACTION_UP -> {
-                        val start = clockTouch
-                        clockTouch = null
-                        if (clock != null && start != null) {
-                            val slop = ViewConfiguration.get(host.context).scaledTouchSlop
-                            if (kotlin.math.abs(event.rawX - start.x) <= slop && kotlin.math.abs(event.rawY - start.y) <= slop) {
-                                if (event.eventTime - start.time >= ViewConfiguration.getLongPressTimeout()) {
-                                    main.post {
-                                        install("Open alarms") {
-                                            val alarm = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
-                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            host.context.startActivity(alarm)
-                                        }
-                                    }
-                                } else {
-                                    secondsOverride = !(secondsOverride ?: settings?.clockSeconds ?: false)
-                                    main.post { install("Clock gesture") { clockUpdate?.invoke(clock) } }
-                                }
-                            }
-                        }
-                    }
-                }
+            if (host != null && event != null && host in lineHosts &&
+                settings?.options?.clockGestures == true
+            ) {
+                val detector = clockGestures.getOrPut(host) { createClockGestureDetector(host) }
+                detector.onTouchEvent(event)
             }
             chain.proceed()
         }
+    }
+
+    private fun createClockGestureDetector(host: View): GestureDetector {
+        val hostRef = WeakReference(host)
+        val listener = object : GestureDetector.SimpleOnGestureListener() {
+            private fun clockAt(event: MotionEvent): TextView? {
+                val targetHost = hostRef.get()?.takeIf { it.isAttachedToWindow } ?: return null
+                if (settings?.options?.clockGestures != true) return null
+                return clockControllers.keys.firstOrNull { clock ->
+                    if (!clock.isShown || !clock.isAttachedToWindow ||
+                        generateSequence(clock as View) { it.parent as? View }.none { it === targetHost }
+                    ) return@firstOrNull false
+
+                    val bounds = android.graphics.Rect()
+                    if (!clock.getGlobalVisibleRect(bounds)) return@firstOrNull false
+                    val rootPosition = IntArray(2)
+                    clock.rootView.getLocationOnScreen(rootPosition)
+                    bounds.offset(rootPosition[0], rootPosition[1])
+                    bounds.contains(event.rawX.toInt(), event.rawY.toInt())
+                }
+            }
+
+            override fun onDown(event: MotionEvent): Boolean = clockAt(event) != null
+
+            override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+                val clock = clockAt(event) ?: return false
+                val current = settings ?: return false
+                dimSecondsOverride = !(dimSecondsOverride ?: current.options.dimSeconds)
+                install("Toggle dimmed clock seconds") { clockUpdate?.invoke(clock) }
+                return true
+            }
+
+            override fun onDoubleTap(event: MotionEvent): Boolean {
+                firstTapOnClock = clockAt(event) != null
+                return firstTapOnClock
+            }
+
+            override fun onDoubleTapEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    secondTapX = event.rawX
+                    secondTapY = event.rawY
+                    validSecondTap = firstTapOnClock && clockAt(event) != null
+                }
+                val slop = hostRef.get()?.let { ViewConfiguration.get(it.context).scaledTouchSlop } ?: 0
+                if (event.actionMasked == MotionEvent.ACTION_CANCEL || event.pointerCount != 1 ||
+                    kotlin.math.abs(event.rawX - secondTapX) > slop ||
+                    kotlin.math.abs(event.rawY - secondTapY) > slop
+                ) validSecondTap = false
+
+                if (event.actionMasked != MotionEvent.ACTION_UP) return validSecondTap
+                val clock = if (validSecondTap) clockAt(event) else null
+                validSecondTap = false
+                val current = settings ?: return false
+                if (clock == null || event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout()) {
+                    return false
+                }
+                secondsOverride = !(secondsOverride ?: current.clockSeconds)
+                main.post { install("Toggle clock seconds") { clockUpdate?.invoke(clock) } }
+                return true
+            }
+
+            override fun onLongPress(event: MotionEvent) {
+                val clock = clockAt(event) ?: return
+                install("Open alarms") {
+                    val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    clock.context.startActivity(intent)
+                }
+            }
+
+            private var firstTapOnClock = false
+            private var secondTapX = 0f
+            private var secondTapY = 0f
+            private var validSecondTap = false
+        }
+        return GestureDetector(host.context, listener, main)
     }
 
     // Limit the alternate child order to measurement and layout calls. OEM icon indices stay intact.

@@ -3,6 +3,7 @@ package dev.statusbar.networkicons
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -65,6 +66,27 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
 
     title("天气")
     toggle("显示天气（状态栏最右侧）", initial.showWeather) { draft = draft.copy(showWeather = it) }
+    toggle(context.getString(R.string.weather_condition), initial.showWeatherCondition) {
+        draft = draft.copy(showWeatherCondition = it)
+    }
+    val weatherLanguages = context.resources.getStringArray(R.array.weather_languages)
+    body.addView(Button(context).apply {
+        fun updateLabel() {
+            text = context.getString(R.string.weather_language_value, weatherLanguages[draft.weatherLanguage.ordinal])
+        }
+        updateLabel()
+        setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle(R.string.weather_language)
+                .setSingleChoiceItems(weatherLanguages, draft.weatherLanguage.ordinal) { dialog, index ->
+                    draft = draft.copy(weatherLanguage = WeatherLanguage.entries[index])
+                    updateLabel()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    })
     title("网速与电量")
     toggle("网速分档变色（50 / 1024 KB/s）", initial.speedColors) { draft = draft.copy(speedColors = it) }
     toggle("网速防抖（连续低速至少 3 秒才隐藏）", initial.speedSmoothing) { draft = draft.copy(speedSmoothing = it) }
@@ -73,7 +95,7 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     toggle("时间前显示星期", initial.weekday) { draft = draft.copy(weekday = it) }
     toggle("淡化秒数", initial.dimSeconds) { draft = draft.copy(dimSeconds = it) }
     toggle("等宽数字", initial.tabularClock) { draft = draft.copy(tabularClock = it) }
-    toggle("点按时间切换秒数，长按打开闹钟", initial.clockGestures) { draft = draft.copy(clockGestures = it) }
+    toggle("时钟手势：单击切换淡化，双击切换显秒，长按打开闹钟", initial.clockGestures) { draft = draft.copy(clockGestures = it) }
     title("图标布局")
     toggle("网速移到时间旁边", initial.speedByClock) { draft = draft.copy(speedByClock = it) }
     val order = field("图标顺序（留空为系统顺序）", initial.iconOrder)
