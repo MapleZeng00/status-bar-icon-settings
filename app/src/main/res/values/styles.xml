@@ -1,0 +1,22 @@
+<resources>
+    <color name="settings_background">#F4F7F1</color>
+    <color name="settings_header">#E8EDE7</color>
+    <color name="settings_panel">#D8E3DA</color>
+    <color name="settings_outline">#A4B0A7</color>
+    <color name="settings_button">#CEE4D4</color>
+    <color name="settings_accent">#30664A</color>
+    <color name="settings_text">#26332B</color>
+    <color name="settings_secondary">#505E55</color>
+
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/settings_background</item>
+        <item name="android:colorBackground">@color/settings_background</item>
+        <item name="android:colorPrimary">@color/settings_header</item>
+        <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:textColorPrimary">@color/settings_text</item>
+        <item name="android:statusBarColor">@color/settings_header</item>
+        <item name="android:navigationBarColor">@color/settings_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

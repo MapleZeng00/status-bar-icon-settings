@@ -1,0 +1,41 @@
+<resources>
+    <string name="app_name">Status Bar Icon Settings</string>
+    <string name="section_icons">状态栏图标</string>
+    <string name="section_line">电量横线</string>
+    <string name="section_clock">时间显示</string>
+    <string name="section_advanced">高级选项</string>
+    <string name="module_description">分别隐藏状态栏的移动网络、Wi-Fi、无 SIM 卡和电池图标。</string>
+    <string name="hide_mobile">隐藏移动网络图标</string>
+    <string name="hide_wifi">隐藏 Wi-Fi 图标</string>
+    <string name="hide_no_sim">隐藏无 SIM 卡图标</string>
+    <string name="hide_battery">隐藏电池图标（含电量数字）</string>
+    <string name="battery_line">横线显示电量</string>
+    <string name="battery_line_color">横线颜色（%1$s）</string>
+    <string name="choose_line_color">选择横线颜色</string>
+    <string name="charging_animation">充电动画（%1$s）</string>
+    <string name="choose_charging_animation">选择充电动画</string>
+    <string-array name="charging_animations">
+        <item>关闭</item>
+        <item>渐变流光</item>
+        <item>波浪</item>
+        <item>彗星拖尾</item>
+        <item>双向扫光</item>
+        <item>呼吸光</item>
+    </string-array>
+    <string name="hue">色相</string>
+    <string name="hex_color">十六进制色值（#RRGGBB）</string>
+    <string name="invalid_hex_color">请输入 6 位十六进制色值</string>
+    <string name="clock_seconds">时间显示秒</string>
+    <string name="clock_color">时间颜色（%1$s）</string>
+    <string name="choose_clock_color">选择时间颜色</string>
+    <string name="system_clock_color">跟随系统</string>
+    <string name="debug_logs">记录详细 Hook 日志</string>
+    <string name="scope_info">在 LSPosed 管理器启用本模块，作用域勾选「系统界面」(com.android.systemui)。首次启用或更新模块后需重新加载一次系统界面，之后设置自动保存。</string>
+    <string name="waiting">等待 LSPosed 服务。启用模块、设置作用域并重启后再打开此页。</string>
+    <string name="ready">已连接 %1$s %2$s · API %3$d</string>
+    <string name="incompatible">需要支持远程首选项的 LSPosed API 102 或更高版本。</string>
+    <string name="saving">正在保存设置…</string>
+    <string name="saved">已保存</string>
+    <string name="read_failed">读取设置失败。请关闭并重新打开此页。</string>
+    <string name="save_failed">保存失败，请重新调整该项设置。</string>
+</resources>
