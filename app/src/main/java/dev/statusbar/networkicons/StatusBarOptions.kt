@@ -4,6 +4,9 @@ import android.content.SharedPreferences
 
 internal enum class WeatherLanguage { SYSTEM, CHINESE, ENGLISH }
 
+internal const val DEFAULT_FLASH_SECONDS = 3
+internal val FLASH_SECONDS = 1..15
+
 internal data class StatusBarOptions(
     val showWeather: Boolean = false,
     val showWeatherCondition: Boolean = false,
@@ -19,6 +22,10 @@ internal data class StatusBarOptions(
     val iconSpacing: Int? = null,
     val speedByClock: Boolean = false,
     val notificationApps: String? = null,
+    val notificationFlash: Boolean = false,
+    val notificationFlashSeconds: Int = DEFAULT_FLASH_SECONDS,
+    val notificationFlashStart: Int = 0xFF42A5F5.toInt(),
+    val notificationFlashEnd: Int = 0xFFAB47BC.toInt(),
     val readingApps: String = "",
     val gamingApps: String = "",
     val rainNotice: Boolean = false,
@@ -47,6 +54,10 @@ internal data class StatusBarOptions(
             .putInt("icon_spacing", iconSpacing ?: -1)
             .putBoolean("speed_by_clock", speedByClock)
             .putString("notification_apps", notificationApps)
+            .putBoolean("notification_flash", notificationFlash)
+            .putInt("notification_flash_seconds", notificationFlashSeconds)
+            .putInt("notification_flash_start", notificationFlashStart)
+            .putInt("notification_flash_end", notificationFlashEnd)
             .putString("reading_apps", readingApps)
             .putString("gaming_apps", gamingApps)
             .putBoolean("rain_notice", rainNotice)
@@ -78,6 +89,11 @@ internal data class StatusBarOptions(
             iconSpacing = (values["icon_spacing"] as? Int)?.takeIf { it in 0..12 },
             speedByClock = values["speed_by_clock"] == true,
             notificationApps = values["notification_apps"] as? String,
+            notificationFlash = values["notification_flash"] == true,
+            notificationFlashSeconds = (values["notification_flash_seconds"] as? Int)
+                ?.takeIf { it in FLASH_SECONDS } ?: DEFAULT_FLASH_SECONDS,
+            notificationFlashStart = values["notification_flash_start"] as? Int ?: 0xFF42A5F5.toInt(),
+            notificationFlashEnd = values["notification_flash_end"] as? Int ?: 0xFFAB47BC.toInt(),
             readingApps = values["reading_apps"] as? String ?: "",
             gamingApps = values["gaming_apps"] as? String ?: "",
             rainNotice = values["rain_notice"] == true,

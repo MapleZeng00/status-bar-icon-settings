@@ -1,4 +1,7 @@
 <resources>
+    <string name="notification_flash_start">渐变起始色</string>
+    <string name="notification_flash_end">渐变结束色</string>
+    <string name="notification_flash_color_value">%1$s（%2$s）</string>
     <string name="app_name">Status Bar Icon Settings</string>
     <string name="section_icons">状态栏图标</string>
     <string name="section_line">电量横线</string>

@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.app.ActivityManager
 import android.app.Notification
+import android.app.NotificationManager
 import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
@@ -12,6 +13,7 @@ import android.view.GestureDetector
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.service.notification.StatusBarNotification
+import android.service.notification.NotificationListenerService.Ranking
 import android.content.res.Resources
 import android.os.Build
 import android.os.Handler
@@ -49,6 +51,7 @@ class NetworkIconModule : XposedModule() {
     )
     private data class ActiveLine(val appearance: LineAppearance, val drawable: WeakReference<BatteryLine>)
     private val lineHosts = WeakHashMap<View, ActiveLine?>()
+    private val notificationFlashes = WeakHashMap<View, WeakReference<NotificationFlash>>()
     private val icons = WeakHashMap<View, IconState>()
     private var foregroundReader: (() -> String?)? = null
     private var profile: Profile? = null
@@ -122,6 +125,7 @@ class NetworkIconModule : XposedModule() {
         install("Status bar gestures") { hookStatusBarGestures() }
         install("Foreground app detection") { prepareForegroundReader(param.classLoader) }
         install("System timer notifications") { prepareTimerReader(param.classLoader) }
+        install("Notification flash") { hookNotificationFlash(param.classLoader) }
         install("Privacy indicators") { preparePrivacyReader(param.classLoader) }
         main.post(reload)
     }
@@ -130,6 +134,14 @@ class NetworkIconModule : XposedModule() {
         val next = IconSettings.read(prefs ?: return)
         val previous = settings
         settings = next
+        if (previous?.options?.notificationFlash != next.options.notificationFlash ||
+            previous.options.notificationFlashStart != next.options.notificationFlashStart ||
+            previous.options.notificationFlashEnd != next.options.notificationFlashEnd ||
+            previous.options.notificationFlashSeconds != next.options.notificationFlashSeconds
+        ) {
+            notificationFlashes.values.forEach { it.get()?.stop() }
+            notificationFlashes.clear()
+        }
         if (previous?.clockSeconds != next.clockSeconds || !next.options.clockGestures) secondsOverride = null
         if (previous != next) report(Log.INFO, "Live settings received")
         if (next.debug) report(Log.DEBUG, "Status bar settings refreshed")
@@ -692,6 +704,77 @@ class NetworkIconModule : XposedModule() {
                 }
                 result
             }
+        }
+    }
+
+    private fun hookNotificationFlash(loader: ClassLoader) {
+        val prefix = "com.android.systemui.statusbar.notification.collection."
+        val collection = Class.forName(prefix + "NotifCollection", false, loader)
+        val entry = Class.forName(prefix + "NotificationEntry", false, loader)
+        val entries = collection.getDeclaredField("mNotificationSet").apply { isAccessible = true }
+        val sbn = entry.getDeclaredField("mSbn").apply { isAccessible = true }
+        val post = collection.getDeclaredMethod("postNotification", Ranking::class.java, StatusBarNotification::class.java)
+        hook(post).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+            var shouldFlash = false
+            if (Looper.myLooper() == Looper.getMainLooper() && settings?.options?.notificationFlash == true) {
+                install("Check notification for flash") {
+                    val current = chain.getArg(1) as? StatusBarNotification
+                    val ranking = chain.getArg(0) as? Ranking
+                    if (current != null && ranking != null) {
+                        val oldEntry = (entries.get(chain.thisObject) as? Map<*, *>)?.get(current.key)
+                        val previous = oldEntry?.let { sbn.get(it) as? StatusBarNotification }
+                        shouldFlash = shouldFlashNotification(current, previous, ranking)
+                    }
+                }
+            }
+            val result = chain.proceed()
+            if (shouldFlash) install("Start notification flash") { flashStatusBar() }
+            result
+        }
+    }
+
+    private fun shouldFlashNotification(
+        posted: StatusBarNotification, previous: StatusBarNotification?, ranking: Ranking,
+    ): Boolean {
+        val notification = posted.notification
+        val ignoredFlags = Notification.FLAG_GROUP_SUMMARY or Notification.FLAG_ONGOING_EVENT or
+            Notification.FLAG_FOREGROUND_SERVICE
+        if ((notification.flags and ignoredFlags) != 0 ||
+            ranking.importance <= NotificationManager.IMPORTANCE_MIN ||
+            (ranking.suppressedVisualEffects and NotificationManager.Policy.SUPPRESSED_EFFECT_STATUS_BAR) != 0 ||
+            System.currentTimeMillis() - posted.postTime !in 0..5000L
+        ) return false
+        if (previous == null) return true
+        if (posted.postTime <= previous.postTime || (notification.flags and Notification.FLAG_ONLY_ALERT_ONCE) != 0) return false
+
+        val oldExtras = previous.notification.extras
+        val extras = notification.extras
+        val lastMessage = lastNotificationMessage(notification)
+        if (lastMessage != null) {
+            val oldMessage = lastNotificationMessage(previous.notification)
+            return oldMessage == null || lastMessage.timestamp != oldMessage.timestamp ||
+                lastMessage.text?.toString() != oldMessage.text?.toString()
+        }
+        return listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_BIG_TEXT).any { key ->
+            extras?.getCharSequence(key)?.toString() != oldExtras?.getCharSequence(key)?.toString()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun lastNotificationMessage(notification: Notification): Notification.MessagingStyle.Message? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        val messages = notification.extras?.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
+        return Notification.MessagingStyle.Message.getMessagesFromBundleArray(messages).lastOrNull()
+    }
+
+    private fun flashStatusBar() {
+        val options = settings?.options?.takeIf { it.notificationFlash } ?: return
+        lineHosts.keys.filter { it.isAttachedToWindow && it.isShown }.forEach { host ->
+            if (host.context.getSystemService(PowerManager::class.java)?.isInteractive != true) return@forEach
+            val existing = notificationFlashes[host]?.get()
+            val flash = existing ?: NotificationFlash(host).also { notificationFlashes[host] = WeakReference(it) }
+            flash.start(options)
+            if (settings?.debug == true) report(Log.DEBUG, "Notification flash started")
         }
     }
 

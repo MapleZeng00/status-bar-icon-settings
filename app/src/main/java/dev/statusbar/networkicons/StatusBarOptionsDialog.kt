@@ -123,6 +123,30 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     val spacing = field("图标间距（0–12 dp，留空为系统间距）", initial.iconSpacing?.toString().orEmpty())
     spacing.inputType = android.text.InputType.TYPE_CLASS_NUMBER
     title("通知与应用样式")
+    toggle("收到通知时闪烁状态栏", initial.notificationFlash) { draft = draft.copy(notificationFlash = it) }
+    val flashSeconds = field("闪烁持续时间（${FLASH_SECONDS.first}–${FLASH_SECONDS.last} 秒）",
+        initial.notificationFlashSeconds.toString())
+    flashSeconds.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+    fun flashColor(titleId: Int, current: () -> Int, change: (Int) -> Unit) {
+        body.addView(Button(context).apply {
+            fun updateLabel() {
+                text = context.getString(R.string.notification_flash_color_value, context.getString(titleId), colorHex(current()))
+            }
+            updateLabel()
+            setOnClickListener {
+                showColorPicker(context, titleId, current()) {
+                    change(it)
+                    updateLabel()
+                }
+            }
+        })
+    }
+    flashColor(R.string.notification_flash_start, { draft.notificationFlashStart }) {
+        draft = draft.copy(notificationFlashStart = it)
+    }
+    flashColor(R.string.notification_flash_end, { draft.notificationFlashEnd }) {
+        draft = draft.copy(notificationFlashEnd = it)
+    }
     toggle("耳机播放时短暂显示新曲名", initial.headphoneTrack) { draft = draft.copy(headphoneTrack = it) }
     toggle("在系统隐私指示器旁显示摄像头／麦克风文字", initial.privacyLabels) { draft = draft.copy(privacyLabels = it) }
     toggle("启用顶部通知图标白名单", initial.notificationApps != null) {
@@ -138,6 +162,12 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
         .setPositiveButton(android.R.string.ok, null).show()
     dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val seconds = flashSeconds.text.toString().trim().toIntOrNull()
+        if (seconds == null || seconds !in FLASH_SECONDS) {
+            flashSeconds.error = "请输入 ${FLASH_SECONDS.first}–${FLASH_SECONDS.last} 秒"
+            flashSeconds.requestFocus()
+            return@setOnClickListener
+        }
         val spacingText = spacing.text.toString().trim()
         val dp = spacingText.toIntOrNull()
         if (spacingText.isNotEmpty() && (dp == null || dp !in 0..12)) {
@@ -172,6 +202,7 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
             iconOrder = slots.joinToString(","),
             iconSpacing = dp,
             notificationApps = draft.notificationApps?.let { packageNames(allowed.text.toString()).joinToString(",") },
+            notificationFlashSeconds = seconds,
             readingApps = packageNames(reading.text.toString()).joinToString(","),
             gamingApps = packageNames(gaming.text.toString()).joinToString(","),
             secondClockZone = zoneId,
