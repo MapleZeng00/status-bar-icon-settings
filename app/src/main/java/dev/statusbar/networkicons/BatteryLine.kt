@@ -34,6 +34,7 @@ internal class BatteryLine(
     private val showBattery: Boolean,
     private val hourlyStar: Boolean,
     private val chargeParticles: Boolean,
+    private val chargeFinale: Boolean = false,
 ) : Drawable(), View.OnAttachStateChangeListener, View.OnLayoutChangeListener {
     private val paint = Paint().apply { this.color = color }
     private val animationPath = Path()
@@ -54,6 +55,8 @@ internal class BatteryLine(
     private var registered = false
     private var previousLevel: Int? = null
     private var plugged = false
+    private var finalePlayed = false
+    private val finale = StatusBarEffect(host)
     private var burstStart = 0L
     private var starStart = 0L
     private var lastStarHour: LocalDateTime? = null
@@ -110,6 +113,7 @@ internal class BatteryLine(
     }
 
     override fun onViewDetachedFromWindow(view: View) {
+        finale.stop()
         unscheduleSelf(nextFrame)
         view.removeCallbacks(starCheck)
         view.removeOnLayoutChangeListener(this)
@@ -150,12 +154,23 @@ internal class BatteryLine(
         val remaining = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 0)
         val nowPlugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        if (!nowPlugged) {
+            finalePlayed = false
+            finale.stop()
+        }
         if (remaining in 0..scale && scale > 0) {
             val next = (remaining.toDouble() / scale * FULL_LEVEL).roundToInt()
             val previous = previousLevel
-            if (chargeParticles && plugged && nowPlugged && power?.isInteractive == true && previous != null &&
-                ((previous < 8000 && next >= 8000) || (previous < FULL_LEVEL && next == FULL_LEVEL))
-            ) burstStart = SystemClock.uptimeMillis()
+            if (plugged && nowPlugged && previous != null) {
+                val reachedFull = previous < FULL_LEVEL && next == FULL_LEVEL
+                val interactive = power?.isInteractive == true
+                if (chargeFinale && reachedFull && !finalePlayed) {
+                    finalePlayed = true
+                    if (interactive) finale.play(rain = false)
+                } else if (chargeParticles && interactive &&
+                    ((previous < 8000 && next >= 8000) || (reachedFull && !chargeFinale))
+                ) burstStart = SystemClock.uptimeMillis()
+            }
             level = next
             previousLevel = next
         }
@@ -283,6 +298,14 @@ internal class BatteryLine(
     }
 
     private var animationHeight = 0
+
+    fun previewCharge() {
+        level = 7600
+        charging = true
+        animationStart = SystemClock.uptimeMillis()
+        resize()
+        host.overlay.add(this)
+    }
 
     private fun drawGradient(canvas: Canvas, width: Float, progress: Float) {
         val band = (76 * host.resources.displayMetrics.density).coerceAtMost(width)

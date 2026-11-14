@@ -38,6 +38,12 @@ internal data class StatusBarOptions(
     val privacyLabels: Boolean = false,
     val secondClockZone: String = "Europe/London",
     val secondClockApps: String = "",
+    val batteryEstimate: Boolean = false,
+    val calendarCountdown: Boolean = false,
+    val calendarTitle: Boolean = false,
+    val rainDrops: Boolean = false,
+    val chargeFinale: Boolean = false,
+    val unreadDot: Boolean = false,
 ) {
     fun save(editor: SharedPreferences.Editor) {
         editor.putBoolean("show_weather", showWeather)
@@ -70,6 +76,12 @@ internal data class StatusBarOptions(
             .putBoolean("privacy_labels", privacyLabels)
             .putString("second_clock_zone", secondClockZone)
             .putString("second_clock_apps", secondClockApps)
+            .putBoolean("battery_estimate", batteryEstimate)
+            .putBoolean("calendar_countdown", calendarCountdown)
+            .putBoolean("calendar_title", calendarTitle)
+            .putBoolean("rain_drops", rainDrops)
+            .putBoolean("charge_finale", chargeFinale)
+            .putBoolean("unread_dot", unreadDot)
     }
 
     companion object {
@@ -106,6 +118,12 @@ internal data class StatusBarOptions(
             privacyLabels = values["privacy_labels"] == true,
             secondClockZone = values["second_clock_zone"] as? String ?: "Europe/London",
             secondClockApps = values["second_clock_apps"] as? String ?: "",
+            batteryEstimate = values["battery_estimate"] == true,
+            calendarCountdown = values["calendar_countdown"] == true,
+            calendarTitle = values["calendar_title"] == true,
+            rainDrops = values["rain_drops"] == true,
+            chargeFinale = values["charge_finale"] == true,
+            unreadDot = values["unread_dot"] == true,
         )
     }
 }

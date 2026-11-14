@@ -31,6 +31,9 @@ internal class StatusBarWeather(
     private var reserved = 0
     private var showCondition = false
     private var rainNotice = false
+    private var rainDrops = false
+    private var rainWasShown = false
+    private val rainEffect = StatusBarEffect(label)
     private var language = WeatherLanguage.SYSTEM
     private var latestReading: Reading? = null
     private val refresh = Runnable { readWeather() }
@@ -52,11 +55,14 @@ internal class StatusBarWeather(
         frame.removeView(label)
     }
 
-    fun configure(showCondition: Boolean, language: WeatherLanguage, rainNotice: Boolean) {
-        if (this.showCondition == showCondition && this.language == language && this.rainNotice == rainNotice) return
+    fun configure(showCondition: Boolean, language: WeatherLanguage, rainNotice: Boolean, rainDrops: Boolean) {
+        if (this.showCondition == showCondition && this.language == language &&
+            this.rainNotice == rainNotice && this.rainDrops == rainDrops
+        ) return
         this.showCondition = showCondition
         this.language = language
         this.rainNotice = rainNotice
+        this.rainDrops = rainDrops
         show(latestReading)
     }
 
@@ -84,6 +90,7 @@ internal class StatusBarWeather(
         active = false
         generation++
         frame.removeCallbacks(refresh)
+        rainEffect.stop()
     }
 
     private fun readWeather() {
@@ -122,6 +129,16 @@ internal class StatusBarWeather(
         label.text = display
         label.contentDescription = rainLabel ?: reading?.let { listOfNotNull(description, temperature).joinToString(" ") }
         label.visibility = if (reading == null) View.GONE else View.VISIBLE
+        val showRainEffect = rainLabel != null && rainDrops
+        if (!showRainEffect) rainEffect.stop()
+        if (showRainEffect && !rainWasShown) {
+            label.post {
+                if (active && rainWasShown && label.context.getSystemService(android.os.PowerManager::class.java)
+                        ?.isInteractive == true
+                ) rainEffect.play(rain = true)
+            }
+        }
+        rainWasShown = showRainEffect
         val next = if (reading == null) 0 else {
             label.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
             label.measuredWidth + (4 * label.resources.displayMetrics.density).roundToInt()

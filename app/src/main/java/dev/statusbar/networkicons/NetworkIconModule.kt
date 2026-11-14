@@ -6,7 +6,9 @@ import android.content.res.ColorStateList
 import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.KeyguardManager
 import android.os.PowerManager
+import android.os.BatteryManager
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.GestureDetector
@@ -30,6 +32,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
 
 class NetworkIconModule : XposedModule() {
     private var isSystemUi = false
@@ -47,11 +50,21 @@ class NetworkIconModule : XposedModule() {
     private var clockUpdate: Method? = null
     private data class LineAppearance(
         val color: Int, val batteryColors: Boolean, val animation: ChargingAnimation,
-        val showBattery: Boolean, val star: Boolean, val particles: Boolean,
+        val showBattery: Boolean, val star: Boolean, val particles: Boolean, val finale: Boolean,
     )
     private data class ActiveLine(val appearance: LineAppearance, val drawable: WeakReference<BatteryLine>)
     private val lineHosts = WeakHashMap<View, ActiveLine?>()
     private val notificationFlashes = WeakHashMap<View, WeakReference<NotificationFlash>>()
+    private val unreadKeys = mutableSetOf<String>()
+    private val glanceReader by lazy { Executors.newSingleThreadExecutor() }
+    private var calendarStart = 0L
+    private var calendarTitle: String? = null
+    private var calendarReadAt = 0L
+    private var calendarReading = false
+    private var calendarGeneration = 0
+    private var batteryEstimateRequest = 0
+    private var batteryEstimateText: String? = null
+    private var batteryEstimateUntil = 0L
     private val icons = WeakHashMap<View, IconState>()
     private var foregroundReader: (() -> String?)? = null
     private var profile: Profile? = null
@@ -126,6 +139,8 @@ class NetworkIconModule : XposedModule() {
         install("Foreground app detection") { prepareForegroundReader(param.classLoader) }
         install("System timer notifications") { prepareTimerReader(param.classLoader) }
         install("Notification flash") { hookNotificationFlash(param.classLoader) }
+        install("Unread notification dismissal") { hookUnreadDismissal(param.classLoader) }
+        install("Unread notification click") { hookUnreadClick(param.classLoader) }
         install("Privacy indicators") { preparePrivacyReader(param.classLoader) }
         main.post(reload)
     }
@@ -134,6 +149,19 @@ class NetworkIconModule : XposedModule() {
         val next = IconSettings.read(prefs ?: return)
         val previous = settings
         settings = next
+        if (!next.options.unreadDot) unreadKeys.clear()
+        if (previous?.options?.calendarCountdown != next.options.calendarCountdown ||
+            previous?.options?.calendarTitle != next.options.calendarTitle
+        ) {
+            calendarGeneration++
+            calendarStart = 0L
+            calendarTitle = null
+            calendarReadAt = 0L
+        }
+        if (!next.options.batteryEstimate) {
+            batteryEstimateRequest++
+            batteryEstimateText = null
+        }
         if (previous?.options?.notificationFlash != next.options.notificationFlash ||
             previous.options.notificationFlashStart != next.options.notificationFlashStart ||
             previous.options.notificationFlashEnd != next.options.notificationFlashEnd ||
@@ -148,6 +176,7 @@ class NetworkIconModule : XposedModule() {
         readingPackages = packageNames(next.options.readingApps)
         gamingPackages = packageNames(next.options.gamingApps)
         allowedPackages = next.options.notificationApps?.let(::packageNames)
+        if (previous?.options?.notificationApps != next.options.notificationApps) unreadKeys.clear()
         if (!next.options.speedGraph) speedHistory.clear()
         main.removeCallbacks(foregroundCheck)
         refreshForeground(refresh = false)
@@ -296,7 +325,8 @@ class NetworkIconModule : XposedModule() {
             return
         }
         weatherViews[host]?.get()?.let {
-            it.configure(current.options.showWeatherCondition, current.options.weatherLanguage, current.options.rainNotice)
+            it.configure(current.options.showWeatherCondition, current.options.weatherLanguage,
+                current.options.rainNotice, current.options.rainDrops)
             return
         }
         val resources = host.resources
@@ -305,7 +335,8 @@ class NetworkIconModule : XposedModule() {
         val frame = contents.parent as? android.widget.FrameLayout ?: return
         if (contents.layoutParams !is android.widget.FrameLayout.LayoutParams) return
         val weather = StatusBarWeather(frame, contents)
-        weather.configure(current.options.showWeatherCondition, current.options.weatherLanguage, current.options.rainNotice)
+        weather.configure(current.options.showWeatherCondition, current.options.weatherLanguage,
+            current.options.rainNotice, current.options.rainDrops)
         weatherTint?.let(weather::tint)
         weather.install()
         weatherViews[host] = WeakReference(weather)
@@ -316,16 +347,17 @@ class NetworkIconModule : XposedModule() {
         val showBattery = profile == Profile.READING || (profile == null && settings.batteryLine)
         val star = profile == null && options.hourlyStar
         val particles = profile == null && options.chargeParticles
+        val finale = profile == null && options.chargeFinale
         val appearance = LineAppearance(
-            settings.batteryLineColor, options.batteryColors, settings.chargingAnimation, showBattery, star, particles,
+            settings.batteryLineColor, options.batteryColors, settings.chargingAnimation, showBattery, star, particles, finale,
         )
         val previous = lineHosts[view]
-        val enabled = showBattery || star || particles || (profile == null && options.timerLine)
+        val enabled = showBattery || star || particles || finale || (profile == null && options.timerLine)
         if (enabled && previous?.appearance == appearance && previous.drawable.get() != null) return
         previous?.drawable?.get()?.uninstall()
         lineHosts[view] = if (enabled) {
             val line = BatteryLine(
-                view, appearance.color, appearance.batteryColors, appearance.animation, showBattery, star, particles,
+                view, appearance.color, appearance.batteryColors, appearance.animation, showBattery, star, particles, finale,
             )
             line.timer = timer.takeIf { profile == null && options.timerLine }
             line.install()
@@ -626,7 +658,8 @@ class NetworkIconModule : XposedModule() {
         main.removeCallbacks(extrasCheck)
         val options = settings?.options ?: return
         val hostList = lineHosts.keys.filter { it.isAttachedToWindow }
-        val uiEnabled = options.speedGraph || options.headphoneTrack || options.secondClock || options.privacyLabels
+        val uiEnabled = options.speedGraph || options.headphoneTrack || options.secondClock || options.privacyLabels ||
+            options.calendarCountdown || options.batteryEstimate || options.unreadDot
         if (uiEnabled || options.timerLine) main.postDelayed(extrasCheck, 1000)
         val interactive = hostList.firstOrNull()?.context?.getSystemService(PowerManager::class.java)?.isInteractive == true
         timer = null
@@ -639,6 +672,16 @@ class NetworkIconModule : XposedModule() {
             return
         }
         val uiOptions = if (profile == null) options else StatusBarOptions(privacyLabels = options.privacyLabels)
+        val context = hostList.firstOrNull()?.context ?: return
+        val unlocked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == false
+        if (!unlocked) {
+            batteryEstimateRequest++
+            batteryEstimateText = null
+        }
+        val glanceText = if (unlocked && profile == null) {
+            val event = if (uiOptions.calendarCountdown) calendarCountdown(context, uiOptions.calendarTitle) else null
+            batteryEstimateText?.takeIf { SystemClock.elapsedRealtime() < batteryEstimateUntil } ?: event
+        } else null
         pruneSpeedHistory(SystemClock.elapsedRealtime())
         var privacyKinds = emptySet<String>()
         if (uiOptions.privacyLabels) install("Read privacy indicators") {
@@ -666,7 +709,68 @@ class NetworkIconModule : XposedModule() {
                 uiOptions, clock, speedView,
                 clockApps.isEmpty() || foregroundApp in clockApps, speedHistory.toList(), !speedBlocked && speedView != null,
                 privacyKinds, weatherTint?.defaultColor ?: clock?.currentTextColor ?: -1,
+                glanceText, unlocked && uiOptions.unreadDot && unreadKeys.isNotEmpty(),
             )
+        }
+    }
+
+    private fun calendarCountdown(context: android.content.Context, showTitle: Boolean): String? {
+        val elapsed = SystemClock.elapsedRealtime()
+        if (!calendarReading && elapsed >= calendarReadAt) {
+            calendarReading = true
+            calendarReadAt = elapsed + 30_000L
+            val generation = calendarGeneration
+            glanceReader.execute {
+                val event = try {
+                    context.contentResolver.call(calendarCountdownUri, "next", if (showTitle) "title" else null, null)
+                } catch (error: RuntimeException) {
+                    Log.w(LOG_TAG, "Calendar source unavailable (${error.javaClass.simpleName})")
+                    null
+                }
+                main.post {
+                    calendarReading = false
+                    if (generation == calendarGeneration) {
+                        calendarStart = event?.getLong("start") ?: 0L
+                        calendarTitle = event?.getString("title")
+                    }
+                }
+            }
+        }
+        val remaining = calendarStart - System.currentTimeMillis()
+        if (remaining !in 1..CALENDAR_LOOKAHEAD_MS) return null
+        val minutes = (remaining + 59_999) / 60_000
+        return calendarTitle?.takeIf { showTitle && it.isNotBlank() }?.let { "${minutes}分钟后 · $it" }
+            ?: "日程 · ${minutes}分钟后"
+    }
+
+    private fun requestBatteryEstimate(host: View) {
+        val context = host.context
+        if (context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false) return
+        val request = ++batteryEstimateRequest
+        glanceReader.execute {
+            val label = try {
+                val battery = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 }
+                val remaining = if (plugged == true) {
+                    context.getSystemService(BatteryManager::class.java)?.computeChargeTimeRemaining()
+                } else if (plugged == false && Build.VERSION.SDK_INT >= 31) {
+                    context.getSystemService(PowerManager::class.java)?.batteryDischargePrediction?.toMillis()
+                } else null
+                remaining?.takeIf { it > 0 }?.let {
+                    val minutes = (it + 59_999) / 60_000
+                    val duration = if (minutes < 60) "${minutes}分钟" else "${minutes / 60}小时${minutes % 60}分"
+                    if (plugged == true) "约${duration}充满" else "约可用$duration"
+                }
+            } catch (error: RuntimeException) {
+                Log.w(LOG_TAG, "Battery estimate unavailable", error)
+                null
+            }
+            main.post {
+                if (request != batteryEstimateRequest || !host.isAttachedToWindow) return@post
+                batteryEstimateText = label
+                batteryEstimateUntil = SystemClock.elapsedRealtime() + 4500
+                install("Show battery estimate") { refreshExtras() }
+            }
         }
     }
 
@@ -715,20 +819,63 @@ class NetworkIconModule : XposedModule() {
         val sbn = entry.getDeclaredField("mSbn").apply { isAccessible = true }
         val post = collection.getDeclaredMethod("postNotification", Ranking::class.java, StatusBarNotification::class.java)
         hook(post).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
-            var shouldFlash = false
-            if (Looper.myLooper() == Looper.getMainLooper() && settings?.options?.notificationFlash == true) {
+            var newNotification: StatusBarNotification? = null
+            val options = settings?.options
+            if (Looper.myLooper() == Looper.getMainLooper() &&
+                (options?.notificationFlash == true || options?.unreadDot == true)
+            ) {
                 install("Check notification for flash") {
                     val current = chain.getArg(1) as? StatusBarNotification
                     val ranking = chain.getArg(0) as? Ranking
                     if (current != null && ranking != null) {
                         val oldEntry = (entries.get(chain.thisObject) as? Map<*, *>)?.get(current.key)
                         val previous = oldEntry?.let { sbn.get(it) as? StatusBarNotification }
-                        shouldFlash = shouldFlashNotification(current, previous, ranking)
+                        if (shouldFlashNotification(current, previous, ranking)) newNotification = current
                     }
                 }
             }
             val result = chain.proceed()
-            if (shouldFlash) install("Start notification flash") { flashStatusBar() }
+            newNotification?.let {
+                if (options?.unreadDot == true && (allowedPackages == null || it.packageName in allowedPackages.orEmpty())) {
+                    unreadKeys.add(it.key)
+                }
+                if (options?.notificationFlash == true) install("Start notification flash") { flashStatusBar() }
+            }
+            result
+        }
+    }
+
+    private fun hookUnreadDismissal(loader: ClassLoader) {
+        val prefix = "com.android.systemui.statusbar.notification.collection."
+        val collection = Class.forName(prefix + "NotifCollection", false, loader)
+        val entry = Class.forName(prefix + "NotificationEntry", false, loader)
+        val sbn = entry.getDeclaredField("mSbn").apply { isAccessible = true }
+        val methods = collection.declaredMethods.filter {
+            it.name in setOf("tryRemoveNotification", "dismissNotification") && it.parameterTypes.firstOrNull() == entry
+        }
+        check(methods.isNotEmpty()) { "No notification dismissal method" }
+        for (method in methods) {
+            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+                val result = chain.proceed()
+                if ((method.returnType == Void.TYPE || result == true) &&
+                    Looper.myLooper() == Looper.getMainLooper() && unreadKeys.isNotEmpty()
+                ) {
+                    val removed = (sbn.get(chain.getArg(0)) as? StatusBarNotification)?.key
+                    if (removed != null) unreadKeys.remove(removed)
+                }
+                result
+            }
+        }
+    }
+
+    private fun hookUnreadClick(loader: ClassLoader) {
+        val clicker = Class.forName("com.android.systemui.statusbar.NotificationClickNotifier", false, loader)
+        val visibility = Class.forName("com.android.internal.statusbar.NotificationVisibility", false, loader)
+        val method = clicker.getDeclaredMethod("onNotificationClick", String::class.java, visibility)
+        hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
+            val key = chain.getArg(0) as? String
+            val result = chain.proceed()
+            if (key != null) main.post { unreadKeys.remove(key) }
             result
         }
     }
@@ -808,19 +955,25 @@ class NetworkIconModule : XposedModule() {
         hook(target).setExceptionMode(ExceptionMode.PROTECTIVE).intercept { chain ->
             val host = chain.thisObject as? View
             val event = chain.getArg(0) as? MotionEvent
+            var keepBlankTap = false
             if (host != null && event != null && host in lineHosts &&
-                (settings?.options?.clockGestures == true || weatherViews[host]?.get() != null)
+                (settings?.options?.clockGestures == true || settings?.options?.batteryEstimate == true ||
+                    weatherViews[host]?.get() != null)
             ) {
                 val detector = statusBarGestures.getOrPut(host) { createStatusBarGestureDetector(host) }
-                detector.onTouchEvent(event)
+                val handled = detector.onTouchEvent(event)
+                keepBlankTap = event.actionMasked == MotionEvent.ACTION_DOWN && handled &&
+                    isBatteryEstimateTap(host, event)
             }
-            chain.proceed()
+            val result = chain.proceed()
+            if (keepBlankTap) true else result
         }
     }
 
     private fun createStatusBarGestureDetector(host: View): GestureDetector {
         val hostRef = WeakReference(host)
         val listener = object : GestureDetector.SimpleOnGestureListener() {
+            private var startedOnBlank = false
             private fun clockAt(event: MotionEvent): TextView? {
                 val targetHost = hostRef.get()?.takeIf { it.isAttachedToWindow } ?: return null
                 if (settings?.options?.clockGestures != true) return null
@@ -838,9 +991,18 @@ class NetworkIconModule : XposedModule() {
                 return weatherViews[targetHost]?.get()?.takeIf { containsTouch(it.view, event) }
             }
 
-            override fun onDown(event: MotionEvent): Boolean = weatherAt(event) != null || clockAt(event) != null
+            override fun onDown(event: MotionEvent): Boolean {
+                startedOnBlank = hostRef.get()?.let { isBatteryEstimateTap(it, event) } == true
+                return startedOnBlank || weatherAt(event) != null || clockAt(event) != null
+            }
 
             override fun onSingleTapUp(event: MotionEvent): Boolean {
+                if (startedOnBlank) {
+                    val target = hostRef.get() ?: return false
+                    if (!isBatteryEstimateTap(target, event)) return false
+                    install("Read battery estimate") { requestBatteryEstimate(target) }
+                    return true
+                }
                 if (weatherAt(event) != null) return false
                 val clock = clockAt(event) ?: return false
                 val current = settings ?: return false
@@ -851,6 +1013,7 @@ class NetworkIconModule : XposedModule() {
             }
 
             override fun onLongPress(event: MotionEvent) {
+                if (startedOnBlank) return
                 val weather = weatherAt(event)
                 if (weather != null) {
                     install("Open Xiaomi Weather") { weather.openApp() }
@@ -869,6 +1032,30 @@ class NetworkIconModule : XposedModule() {
             // SimpleOnGestureListener also implements OnDoubleTapListener.
             setOnDoubleTapListener(null)
         }
+    }
+
+    private fun isBatteryEstimateTap(host: View, event: MotionEvent): Boolean {
+        if (settings?.options?.batteryEstimate != true || profile != null || !containsTouch(host, event)) return false
+        val group = host as? ViewGroup ?: return false
+        val batteryIndicatorId = host.resources.getIdentifier("battery_indicator", "id", SYSTEM_UI)
+        val decorativeLine = host.findViewById<View>(batteryIndicatorId)
+        return !hasStatusBarContentAt(group, event, decorativeLine)
+    }
+
+    private fun hasStatusBarContentAt(group: ViewGroup, event: MotionEvent, decorativeLine: View?): Boolean {
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            if (child === decorativeLine || child is android.widget.Space ||
+                child.alpha <= 0f || !containsTouch(child, event)
+            ) continue
+            if (child.isClickable || child.isLongClickable || child in icons) return true
+            if (child is ViewGroup) {
+                if (hasStatusBarContentAt(child, event, decorativeLine)) return true
+            } else if (child !is TextView || child.text.isNotEmpty()) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun containsTouch(view: View, event: MotionEvent): Boolean {

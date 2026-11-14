@@ -33,6 +33,11 @@ internal class StatusBarExtras(private val host: View) {
     private val second = label(11f)
     private val track = label(11f).apply { maxWidth = (92 * density).roundToInt() }
     private val privacy = label(10f)
+    private val glance = label(11f).apply { maxWidth = (118 * density).roundToInt() }
+    private val unread = label(13f).apply {
+        text = "•"
+        contentDescription = "未读通知"
+    }
     private val graph = SpeedGraph(host.context)
     private var lastTrack: String? = null
     private var trackUntil = 0L
@@ -53,6 +58,8 @@ internal class StatusBarExtras(private val host: View) {
         speedVisible: Boolean,
         privacyKinds: Set<String>,
         tint: Int,
+        glanceText: String?,
+        unreadVisible: Boolean,
     ) {
         val parent = clock?.parent as? LinearLayout ?: find<LinearLayout>("phone_status_bar_left_container")
         val speedGroup = if (speedView is TextView) parent else find<LinearLayout>("system_icons")
@@ -86,7 +93,16 @@ internal class StatusBarExtras(private val host: View) {
             lastTrack = title
             trackUntil = now + 4000
         }
-        setLabel(track, title?.takeIf { now < trackUntil }, tint, parent, index)
+        if (glanceText != null) {
+            detach(track)
+            setLabel(glance, glanceText, tint, parent, index++)
+        } else {
+            detach(glance)
+            val trackTitle = title?.takeIf { now < trackUntil }
+            setLabel(track, trackTitle, tint, parent, index)
+            if (trackTitle != null) index++
+        }
+        setLabel(unread, "•".takeIf { unreadVisible }, 0xFF2EAE76.toInt(), parent, index)
 
         val indicator = find<View>("home_privacy_container")?.takeIf { it.isShown }
         val privacyGroup = (indicator?.parent as? LinearLayout) ?: find<LinearLayout>("privacy_container")
@@ -106,7 +122,7 @@ internal class StatusBarExtras(private val host: View) {
     }
 
     fun clear() {
-        listOf(second, track, privacy, graph).forEach(::detach)
+        listOf(second, track, privacy, graph, glance, unread).forEach(::detach)
         lastTrack = null
         trackUntil = 0
         observedTrack = null

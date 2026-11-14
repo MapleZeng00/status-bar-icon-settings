@@ -10,7 +10,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, onSave: (StatusBarOptions) -> Unit) {
+internal fun showStatusBarOptions(
+    context: Context, initial: StatusBarOptions, batteryColor: Int, chargingAnimation: ChargingAnimation,
+    onSave: (StatusBarOptions) -> Unit,
+) {
     var draft = initial
     val density = context.resources.displayMetrics.density
     val padding = (20 * density).toInt()
@@ -67,6 +70,7 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     title("天气")
     toggle("显示天气（状态栏最右侧）", initial.showWeather) { draft = draft.copy(showWeather = it) }
     toggle("降雨提醒（需开启天气）", initial.rainNotice) { draft = draft.copy(rainNotice = it) }
+    toggle("降雨提醒出现时播放小雨滴", initial.rainDrops) { draft = draft.copy(rainDrops = it) }
     toggle(context.getString(R.string.weather_condition), initial.showWeatherCondition) {
         draft = draft.copy(showWeatherCondition = it)
     }
@@ -95,7 +99,11 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     toggle("电量线按电量变色（绿色／橙色／红色）", initial.batteryColors) { draft = draft.copy(batteryColors = it) }
     toggle("系统计时器进度线", initial.timerLine) { draft = draft.copy(timerLine = it) }
     toggle("充电达到 80% 和 100% 时显示粒子", initial.chargeParticles) { draft = draft.copy(chargeParticles = it) }
+    toggle("点击状态栏空白处查看续航或充满时间", initial.batteryEstimate) { draft = draft.copy(batteryEstimate = it) }
+    toggle("充满电时播放星星收尾动画", initial.chargeFinale) { draft = draft.copy(chargeFinale = it) }
     title("时间")
+    toggle("下一场日程倒计时（提前 30 分钟）", initial.calendarCountdown) { draft = draft.copy(calendarCountdown = it) }
+    toggle("同时显示日程标题（默认隐藏）", initial.calendarTitle) { draft = draft.copy(calendarTitle = it) }
     toggle("时间前显示星期", initial.weekday) { draft = draft.copy(weekday = it) }
     toggle("淡化秒数", initial.dimSeconds) { draft = draft.copy(dimSeconds = it) }
     toggle("等宽数字", initial.tabularClock) { draft = draft.copy(tabularClock = it) }
@@ -123,6 +131,7 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     val spacing = field("图标间距（0–12 dp，留空为系统间距）", initial.iconSpacing?.toString().orEmpty())
     spacing.inputType = android.text.InputType.TYPE_CLASS_NUMBER
     title("通知与应用样式")
+    toggle("显示未读通知小点", initial.unreadDot) { draft = draft.copy(unreadDot = it) }
     toggle("收到通知时闪烁状态栏", initial.notificationFlash) { draft = draft.copy(notificationFlash = it) }
     val flashSeconds = field("闪烁持续时间（${FLASH_SECONDS.first}–${FLASH_SECONDS.last} 秒）",
         initial.notificationFlashSeconds.toString())
@@ -147,6 +156,14 @@ internal fun showStatusBarOptions(context: Context, initial: StatusBarOptions, o
     flashColor(R.string.notification_flash_end, { draft.notificationFlashEnd }) {
         draft = draft.copy(notificationFlashEnd = it)
     }
+    body.addView(Button(context).apply {
+        text = "模拟预览"
+        setOnClickListener {
+            val duration = flashSeconds.text.toString().trim().toIntOrNull()?.takeIf { it in FLASH_SECONDS }
+                ?: draft.notificationFlashSeconds
+            showStatusBarPreview(context, draft.copy(notificationFlashSeconds = duration), batteryColor, chargingAnimation)
+        }
+    })
     toggle("耳机播放时短暂显示新曲名", initial.headphoneTrack) { draft = draft.copy(headphoneTrack = it) }
     toggle("在系统隐私指示器旁显示摄像头／麦克风文字", initial.privacyLabels) { draft = draft.copy(privacyLabels = it) }
     toggle("启用顶部通知图标白名单", initial.notificationApps != null) {

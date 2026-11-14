@@ -104,13 +104,18 @@ class SettingsActivity : Activity() {
 
         val advanced = settingsCard(content, R.string.section_advanced)
         optionsButton = addAction(advanced) {
-            showStatusBarOptions(this, options) {
+            showStatusBarOptions(this, options, selectedColor, selectedAnimation) {
                 options = it
                 updateColorButton()
                 updateBatteryButtons()
                 saveSettings()
+                if (it.calendarCountdown &&
+                    checkSelfPermission(android.Manifest.permission.READ_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) requestPermissions(arrayOf(android.Manifest.permission.READ_CALENDAR), 1)
             }
         }.apply { setText(R.string.status_bar_options) }
+        addAction(advanced) { showStatusBarPreview(this, options, selectedColor, selectedAnimation) }
+            .apply { text = "模拟预览" }
         debug = addToggle(advanced, R.string.debug_logs)
         advanced.addView(TextView(this).apply {
             textSize = 13f
